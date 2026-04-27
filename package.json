@@ -10,3 +10,4 @@
     "node-telegram-bot-api": "^0.64.0"
   }
 }
+"firebase": "^10.12.0"
