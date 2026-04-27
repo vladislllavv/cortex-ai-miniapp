@@ -30,7 +30,6 @@ type TaskStore = {
 
 const STORAGE_KEY = "cortex-tasks";
 
-// Получаем ID пользователя из Telegram
 function getTelegramUserId(): string {
   try {
     const tg = (window as any).Telegram?.WebApp;
@@ -62,10 +61,11 @@ function saveTasks(tasks: Task[]) {
   }
 }
 
-// Сохраняем задачу в Firebase
 async function saveTaskToFirebase(task: Task) {
+  const userId = getTelegramUserId();
+  alert("Начинаю сохранение. UserID: " + userId);
+  
   try {
-    const userId = getTelegramUserId();
     await addDoc(collection(db, "tasks"), {
       userId: userId,
       taskId: task.id,
@@ -78,9 +78,10 @@ async function saveTaskToFirebase(task: Task) {
       isSent: false,
       reminderAt: task.dueDate ? Timestamp.fromDate(new Date(task.dueDate)) : null
     });
-    console.log("Задача сохранена в Firebase ✅");
-  } catch (e) {
-    console.error("Ошибка сохранения в Firebase:", e);
+    alert("Задача сохранена в Firebase ✅");
+  } catch (e: any) {
+    alert("Ошибка Firebase: " + e.message);
+    console.error("Ошибка:", e);
   }
 }
 
@@ -89,6 +90,8 @@ export const useTaskStore = create<TaskStore>((set) => ({
   selectedDate: null,
 
   addTask: (task) => {
+    alert("addTask вызван!");
+    
     const dueDate = task.dueDate || new Date().toISOString();
 
     const newTask: Task = {
@@ -105,7 +108,6 @@ export const useTaskStore = create<TaskStore>((set) => ({
       return { tasks: updated };
     });
 
-    // Сохраняем в Firebase
     saveTaskToFirebase(newTask);
   },
 
