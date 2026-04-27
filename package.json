@@ -7,7 +7,15 @@
     "start": "node bot.js"
   },
   "dependencies": {
-    "node-telegram-bot-api": "^0.64.0"
+    {
+  "name": "cortex-ai-bot",
+  "version": "1.0.0",
+  "main": "bot.cjs",
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "firebase": "^10.12.0"
   }
 }
-"firebase": "^10.12.0"
+  }
+}
+
