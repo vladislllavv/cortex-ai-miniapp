@@ -16,6 +16,7 @@ export default function AddBtn() {
   const [priority, setPriority] = useState<TaskPriority>("medium");
 
   const onSave = () => {
+    alert("НОВЫЙ КОД РАБОТАЕТ!");
     const trimmed = title.trim();
     if (!trimmed) return;
 
