@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@theme {
+  --color-tg-bg: #1B4F72;
+  --color-tg-text: #ffffff;
+  --color-tg-button: #2E86C1;
+  --color-tg-secondary-bg: #154360;
+}
+
+:root {
+  color-scheme: dark;
+  --tg-theme-bg-color: #1B4F72;
+  --tg-theme-text-color: #ffffff;
+  --tg-theme-secondary-bg-color: #154360;
+  --tg-theme-button-color: #2E86C1;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(180deg, #1B4F72 0%, #154360 50%, #0E2F44 100%);
+  color: #ffffff;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  min-height: 100vh;
+  overscroll-behavior: none;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.glass {
+  background: rgba(30, 41, 59, 0.55);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+input, textarea {
+  color-scheme: dark;
+}
