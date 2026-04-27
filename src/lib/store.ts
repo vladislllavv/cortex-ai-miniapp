@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { useEffect } from "react";
+import { db } from "./firebase";
+import { collection, addDoc, updateDoc, deleteDoc, doc, Timestamp } from "firebase/firestore";
 
 export type TaskPriority = "low" | "medium" | "high";
 export type TaskStatus = "todo" | "in_progress" | "done";
@@ -28,6 +30,17 @@ type TaskStore = {
 
 const STORAGE_KEY = "cortex-tasks";
 
+// Получаем ID пользователя из Telegram
+function getTelegramUserId(): string {
+  try {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.initDataUnsafe?.user?.id) {
+      return String(tg.initDataUnsafe.user.id);
+    }
+  } catch {}
+  return "unknown";
+}
+
 function loadTasks(): Task[] {
   if (typeof window === "undefined") return [];
   try {
@@ -36,9 +49,7 @@ function loadTasks(): Task[] {
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
-  } catch {
-    // corrupted data — reset
-  }
+  } catch {}
   return [];
 }
 
@@ -51,12 +62,33 @@ function saveTasks(tasks: Task[]) {
   }
 }
 
+// Сохраняем задачу в Firebase
+async function saveTaskToFirebase(task: Task) {
+  try {
+    const userId = getTelegramUserId();
+    await addDoc(collection(db, "tasks"), {
+      userId: userId,
+      taskId: task.id,
+      title: task.title,
+      description: task.description || "",
+      dueDate: task.dueDate || null,
+      priority: task.priority,
+      status: task.status,
+      createdAt: task.createdAt,
+      isSent: false,
+      reminderAt: task.dueDate ? Timestamp.fromDate(new Date(task.dueDate)) : null
+    });
+    console.log("Задача сохранена в Firebase ✅");
+  } catch (e) {
+    console.error("Ошибка сохранения в Firebase:", e);
+  }
+}
+
 export const useTaskStore = create<TaskStore>((set) => ({
   tasks: loadTasks(),
   selectedDate: null,
 
   addTask: (task) => {
-    // Если даты нет — ставим сегодня, чтобы задача всегда была видна
     const dueDate = task.dueDate || new Date().toISOString();
 
     const newTask: Task = {
@@ -72,6 +104,9 @@ export const useTaskStore = create<TaskStore>((set) => ({
       saveTasks(updated);
       return { tasks: updated };
     });
+
+    // Сохраняем в Firebase
+    saveTaskToFirebase(newTask);
   },
 
   updateTask: (taskId, updates) =>
@@ -106,12 +141,9 @@ export const useTaskStore = create<TaskStore>((set) => ({
 
 export function usePersistTasks() {
   useEffect(() => {
-    // Перечитываем из localStorage при монтировании, на случай если
-    // данные обновились в другой вкладке / при перезапуске
     const stored = loadTasks();
     if (stored.length > 0) {
       const current = useTaskStore.getState().tasks;
-      // Если в памяти пусто а в хранилище есть — загружаем
       if (current.length === 0 && stored.length > 0) {
         useTaskStore.setState({ tasks: stored });
       }
