@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { useEffect } from "react";
 import { db } from "./firebase";
-import { collection, addDoc, updateDoc, deleteDoc, doc, Timestamp } from "firebase/firestore";
+import { collection, addDoc, Timestamp } from "firebase/firestore";
 
 export type TaskPriority = "low" | "medium" | "high";
 export type TaskStatus = "todo" | "in_progress" | "done";
