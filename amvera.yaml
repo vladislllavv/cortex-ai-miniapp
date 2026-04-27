@@ -1,12 +1,13 @@
 meta:
-  environment: python
+  environment: node
   toolchain:
-    name: pip
-    version: 3.10
+    name: npm
+    version: 18
 
 build:
-  requirementsPath: requirements.txt
+  installCommand: npm install
+  buildCommand: npm run build
 
 run:
-  scriptName: main.py
-  persistenceMount: /data
+  # Вот тут мы говорим Amvera запустить файл бота
+  scriptName: node bot.js 
