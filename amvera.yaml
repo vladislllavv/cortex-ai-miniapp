@@ -1,0 +1,11 @@
+meta:
+  environment: node
+  toolchain:
+    name: npm
+    version: 18
+
+build:
+  installCommand: npm install
+
+run:
+  scriptName: node bot.js
