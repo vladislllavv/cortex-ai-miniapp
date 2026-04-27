@@ -8,4 +8,4 @@ build:
   installCommand: npm install
 
 run:
-  scriptName: node bot.js
+  command: node bot.js
