@@ -1,6 +1,17 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, query, where, getDocs, updateDoc, doc, Timestamp } = require('firebase/firestore');
+const { 
+  getFirestore, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  updateDoc,
+  setDoc,
+  getDoc,
+  doc, 
+  Timestamp 
+} = require('firebase/firestore');
 
 const firebaseConfig = {
   apiKey: "AIzaSyASx0saii-gMIHmCC_e3i7gAIqL6NxUMZ4",
@@ -18,14 +29,68 @@ const bot = new TelegramBot(token, { polling: true });
 
 console.log("Бот запущен ✅");
 
+// Команда /start
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, "Привет! Я буду напоминать тебе о задачах 🔔");
 });
 
+// Верификация appss
 bot.onText(/\/appss_verify/, (msg) => {
   bot.sendMessage(msg.chat.id, "appss_73be81");
 });
 
+// Команда /subscribe — отправляем инвойс для оплаты
+bot.onText(/\/subscribe/, async (msg) => {
+  const chatId = msg.chat.id;
+
+  try {
+    await bot.sendInvoice(
+      chatId,
+      "Подписка CortexAI 🚀",
+      "Безлимитные задачи + AI агент на 30 дней",
+      `sub_${chatId}`,
+      "",
+      "XTR",
+      [{ label: "Подписка на 30 дней", amount: 100 }]
+    );
+  } catch (err) {
+    console.log("Ошибка отправки инвойса:", err.message);
+    bot.sendMessage(chatId, "Ошибка при создании счёта. Попробуй позже.");
+  }
+});
+
+// Подтверждение оплаты
+bot.on("pre_checkout_query", (query) => {
+  bot.answerPreCheckoutQuery(query.id, true);
+});
+
+// Успешная оплата
+bot.on("successful_payment", async (msg) => {
+  const userId = String(msg.chat.id);
+
+  try {
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+
+    await setDoc(doc(db, "subscriptions", userId), {
+      userId: userId,
+      isActive: true,
+      expiresAt: Timestamp.fromDate(expiresAt),
+      updatedAt: Timestamp.fromDate(new Date())
+    });
+
+    console.log(`Подписка активирована для ${userId}`);
+
+    bot.sendMessage(
+      msg.chat.id,
+      "✅ Подписка активирована!\n\n🚀 Теперь тебе доступны:\n• Безлимитные задачи\n• AI агент\n\nПодписка действует 30 дней."
+    );
+  } catch (err) {
+    console.log("Ошибка активации подписки:", err.message);
+  }
+});
+
+// Проверка напоминаний каждую минуту
 async function checkReminders() {
   try {
     const now = new Date();
