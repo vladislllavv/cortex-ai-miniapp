@@ -5,6 +5,7 @@ import { collection, addDoc, Timestamp, doc, getDoc } from "firebase/firestore";
 
 export type TaskPriority = "low" | "medium" | "high";
 export type TaskStatus = "todo" | "in_progress" | "done";
+export type TaskRepeat = "none" | "daily";
 
 export type Task = {
   id: string;
@@ -16,6 +17,7 @@ export type Task = {
   isAiCreated: boolean;
   createdAt: string;
   notified: boolean;
+  repeat: TaskRepeat;
 };
 
 type TaskStore = {
@@ -34,43 +36,76 @@ function getTelegramUserId(): string {
   try {
     const tg = (window as any).Telegram?.WebApp;
     if (!tg) return "unknown";
+
     if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
       return String(tg.initDataUnsafe.user.id);
     }
   } catch (e) {
     console.error("Error getting Telegram ID:", e);
   }
+
   return "unknown";
 }
 
-// Проверяем подписку пользователя
+// Проверка подписки
 export async function checkSubscription(userId: string): Promise<boolean> {
   try {
     const subDoc = await getDoc(doc(db, "subscriptions", userId));
+
     if (!subDoc.exists()) return false;
+
     const data = subDoc.data();
+
+    if (!data.isActive || !data.expiresAt) return false;
+
     const expiresAt = data.expiresAt.toDate();
     const now = new Date();
-    return data.isActive && expiresAt > now;
-  } catch {
+
+    return expiresAt > now;
+  } catch (e) {
+    console.error("Subscription check error:", e);
     return false;
   }
 }
 
+// Нормализация старых задач, чтобы не ломались после добавления repeat
+function normalizeTask(task: any): Task {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description || "",
+    dueDate: task.dueDate,
+    priority: task.priority || "medium",
+    status: task.status || "todo",
+    isAiCreated: Boolean(task.isAiCreated),
+    createdAt: task.createdAt || new Date().toISOString(),
+    notified: Boolean(task.notified),
+    repeat: task.repeat === "daily" ? "daily" : "none",
+  };
+}
+
 function loadTasks(): Task[] {
   if (typeof window === "undefined") return [];
+
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
+
     if (stored) {
       const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.map(normalizeTask);
+      }
     }
-  } catch {}
+  } catch (e) {
+    console.error("Failed to load tasks:", e);
+  }
+
   return [];
 }
 
 function saveTasks(tasks: Task[]) {
   if (typeof window === "undefined") return;
+
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
   } catch (e) {
@@ -100,7 +135,8 @@ async function saveTaskToFirebase(task: Task) {
       status: task.status,
       createdAt: task.createdAt,
       isSent: false,
-      reminderAt: reminderAt
+      reminderAt: reminderAt,
+      repeat: task.repeat || "none"
     });
 
     console.log("Задача сохранена в Firebase ✅");
@@ -122,6 +158,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       notified: false,
+      repeat: task.repeat || "none",
     };
 
     set((state) => {
@@ -136,8 +173,11 @@ export const useTaskStore = create<TaskStore>((set) => ({
   updateTask: (taskId, updates) =>
     set((state) => {
       const updated = state.tasks.map((task) =>
-        task.id === taskId ? { ...task, ...updates } : task
+        task.id === taskId
+          ? normalizeTask({ ...task, ...updates })
+          : task
       );
+
       saveTasks(updated);
       return { tasks: updated };
     }),
@@ -155,12 +195,11 @@ export const useTaskStore = create<TaskStore>((set) => ({
         task.id === taskId
           ? {
               ...task,
-              status: (task.status === "done"
-                ? "todo"
-                : "done") as TaskStatus,
+              status: (task.status === "done" ? "todo" : "done") as TaskStatus,
             }
           : task
       );
+
       saveTasks(updated);
       return { tasks: updated };
     }),
@@ -171,9 +210,11 @@ export const useTaskStore = create<TaskStore>((set) => ({
 export function usePersistTasks() {
   useEffect(() => {
     const stored = loadTasks();
+
     if (stored.length > 0) {
       const current = useTaskStore.getState().tasks;
-      if (current.length === 0 && stored.length > 0) {
+
+      if (current.length === 0) {
         useTaskStore.setState({ tasks: stored });
       }
     }
