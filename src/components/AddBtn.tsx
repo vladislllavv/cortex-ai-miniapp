@@ -16,14 +16,25 @@ export default function AddBtn() {
   const [priority, setPriority] = useState<TaskPriority>("medium");
 
   const onSave = () => {
-    alert("НОВЫЙ КОД РАБОТАЕТ!");
+    console.log("Кнопка сохранения нажата ✅");
+
     const trimmed = title.trim();
     if (!trimmed) return;
 
     let dueDate: string | undefined;
-    if (date) {
-      dueDate = new Date(`${date}T${time || "09:00"}:00`).toISOString();
+    if (date && time) {
+      const parsed = new Date(`${date}T${time}:00`);
+      if (!isNaN(parsed.getTime())) {
+        dueDate = parsed.toISOString();
+      }
+    } else if (date) {
+      const parsed = new Date(`${date}T09:00:00`);
+      if (!isNaN(parsed.getTime())) {
+        dueDate = parsed.toISOString();
+      }
     }
+
+    console.log("dueDate:", dueDate);
 
     addTask({
       title: trimmed,
