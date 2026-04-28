@@ -19,25 +19,21 @@ export default function HomePage() {
   tomorrowDate.setDate(tomorrowDate.getDate() + 1);
   const tomorrowStr = tomorrowDate.toISOString().split("T")[0];
 
-  // Все незавершённые задачи
   const activeTasks = useMemo(
     () => tasks.filter((task) => task.status !== "done"),
     [tasks]
   );
 
-  // Задачи на сегодня
   const todayTasks = useMemo(
     () => tasks.filter((task) => task.dueDate?.startsWith(todayStr) && task.status !== "done"),
     [tasks, todayStr]
   );
 
-  // Задачи на завтра
   const tomorrowTasks = useMemo(
     () => tasks.filter((task) => task.dueDate?.startsWith(tomorrowStr) && task.status !== "done"),
     [tasks, tomorrowStr]
   );
 
-  // Задачи на другие даты (не сегодня и не завтра)
   const otherTasks = useMemo(
     () =>
       activeTasks.filter(
@@ -49,7 +45,6 @@ export default function HomePage() {
     [activeTasks, todayStr, tomorrowStr]
   );
 
-  // Выполненные задачи
   const doneTasks = useMemo(
     () => tasks.filter((task) => task.status === "done"),
     [tasks]
@@ -73,9 +68,23 @@ export default function HomePage() {
     setShowWelcome(false);
   };
 
+  // Получаем Telegram ID для проверки
+  const telegramId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id || "не найден";
+
   return (
     <section className="space-y-4 pt-2">
       <Header />
+
+      {/* Блок для проверки Telegram ID - удалим после теста */}
+      <div style={{
+        background: "rgba(255,255,255,0.1)",
+        borderRadius: "8px",
+        padding: "8px",
+        color: "white",
+        fontSize: "12px"
+      }}>
+        Telegram ID: {telegramId}
+      </div>
 
       {showWelcome ? (
         <Card className="space-y-3 text-slate-800">
@@ -87,7 +96,6 @@ export default function HomePage() {
         </Card>
       ) : null}
 
-      {/* Брифинг */}
       <Card className="space-y-2 text-slate-800">
         <h2 className="text-sm font-semibold text-slate-900">{t(language, "dailyBriefing")}</h2>
         <p className="text-xs text-slate-600">
@@ -101,7 +109,6 @@ export default function HomePage() {
         ) : null}
       </Card>
 
-      {/* Сегодня */}
       <div>
         <h3 className="mb-2 text-sm font-semibold text-white">
           📌 {t(language, "today")}{" "}
@@ -116,7 +123,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Завтра */}
       <div>
         <h3 className="mb-2 text-sm font-semibold text-white">
           📋 {t(language, "tomorrow")}{" "}
@@ -131,7 +137,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Позже */}
       {otherTasks.length > 0 && (
         <div>
           <h3 className="mb-2 text-sm font-semibold text-white">
@@ -146,7 +151,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Выполненные */}
       {doneTasks.length > 0 && (
         <div>
           <button
