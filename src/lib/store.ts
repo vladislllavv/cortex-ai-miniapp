@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { useEffect } from "react";
 import { db } from "./firebase";
-import { collection, addDoc, Timestamp } from "firebase/firestore";
+import { collection, addDoc, Timestamp, doc, getDoc } from "firebase/firestore";
 
 export type TaskPriority = "low" | "medium" | "high";
 export type TaskStatus = "todo" | "in_progress" | "done";
@@ -33,11 +33,28 @@ const STORAGE_KEY = "cortex-tasks";
 function getTelegramUserId(): string {
   try {
     const tg = (window as any).Telegram?.WebApp;
-    if (tg?.initDataUnsafe?.user?.id) {
+    if (!tg) return "unknown";
+    if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
       return String(tg.initDataUnsafe.user.id);
     }
-  } catch {}
+  } catch (e) {
+    console.error("Error getting Telegram ID:", e);
+  }
   return "unknown";
+}
+
+// Проверяем подписку пользователя
+export async function checkSubscription(userId: string): Promise<boolean> {
+  try {
+    const subDoc = await getDoc(doc(db, "subscriptions", userId));
+    if (!subDoc.exists()) return false;
+    const data = subDoc.data();
+    const expiresAt = data.expiresAt.toDate();
+    const now = new Date();
+    return data.isActive && expiresAt > now;
+  } catch {
+    return false;
+  }
 }
 
 function loadTasks(): Task[] {
