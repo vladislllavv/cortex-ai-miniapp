@@ -62,10 +62,17 @@ function saveTasks(tasks: Task[]) {
 }
 
 async function saveTaskToFirebase(task: Task) {
-  const userId = getTelegramUserId();
-  alert("Начинаю сохранение. UserID: " + userId);
-  
   try {
+    const userId = getTelegramUserId();
+
+    let reminderAt = null;
+    if (task.dueDate) {
+      const date = new Date(task.dueDate);
+      if (!isNaN(date.getTime())) {
+        reminderAt = Timestamp.fromDate(date);
+      }
+    }
+
     await addDoc(collection(db, "tasks"), {
       userId: userId,
       taskId: task.id,
@@ -76,12 +83,12 @@ async function saveTaskToFirebase(task: Task) {
       status: task.status,
       createdAt: task.createdAt,
       isSent: false,
-      reminderAt: task.dueDate ? Timestamp.fromDate(new Date(task.dueDate)) : null
+      reminderAt: reminderAt
     });
-    alert("Задача сохранена в Firebase ✅");
+
+    console.log("Задача сохранена в Firebase ✅");
   } catch (e: any) {
-    alert("Ошибка Firebase: " + e.message);
-    console.error("Ошибка:", e);
+    console.error("Ошибка сохранения в Firebase:", e.message);
   }
 }
 
@@ -90,8 +97,6 @@ export const useTaskStore = create<TaskStore>((set) => ({
   selectedDate: null,
 
   addTask: (task) => {
-    alert("addTask вызван!");
-    
     const dueDate = task.dueDate || new Date().toISOString();
 
     const newTask: Task = {
@@ -131,7 +136,12 @@ export const useTaskStore = create<TaskStore>((set) => ({
     set((state) => {
       const updated = state.tasks.map((task) =>
         task.id === taskId
-          ? { ...task, status: (task.status === "done" ? "todo" : "done") as TaskStatus }
+          ? {
+              ...task,
+              status: (task.status === "done"
+                ? "todo"
+                : "done") as TaskStatus,
+            }
           : task
       );
       saveTasks(updated);
