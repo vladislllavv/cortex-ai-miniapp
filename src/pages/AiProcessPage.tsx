@@ -3,15 +3,18 @@ import { useTaskStore } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
 import { Send, Bot, Loader2 } from "lucide-react";
 
-const DEEPSEEK_API_KEY = "sk-308657bf24c24b9e8ff230c561dd9109";
+const GROQ_API_KEY = "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";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
-async function askDeepSeek(messages: Message[], tasks: string): Promise<string> {
-  const systemPrompt = `Ты умный AI ассистент планировщика задач CortexAI. 
+async function askGroq(
+  messages: Message[],
+  tasksSummary: string
+): Promise<string> {
+  const systemPrompt = `Ты умный AI ассистент планировщика задач CortexAI.
 Ты помогаешь пользователю:
 1. Анализировать сложность его задач
 2. Давать советы по оптимизации выполнения задач
@@ -19,63 +22,72 @@ async function askDeepSeek(messages: Message[], tasks: string): Promise<string> 
 4. Разбивать сложные задачи на простые шаги
 
 Текущие задачи пользователя:
-${tasks}
+${tasksSummary}
 
-Отвечай кратко, по делу, дружелюбно. Используй эмодзи. Максимум 3-4 предложения на ответ.`;
+Отвечай кратко, по делу, дружелюбно. Используй эмодзи. Максимум 3-4 предложения.`;
 
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${DEEPSEEK_API_KEY}`,
+      Authorization: `Bearer ${GROQ_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "deepseek-chat",
+      model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: systemPrompt },
         ...messages,
       ],
-      max_tokens: 300,
+      max_tokens: 400,
       temperature: 0.7,
     }),
   });
 
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
+  if (!res.ok) {
+    const err = await res.text();
+    console.error("Groq error:", res.status, err);
+    throw new Error(`API ${res.status}: ${err}`);
   }
 
-  const data = await response.json();
-  return data.choices[0]?.message?.content || "Не удалось получить ответ";
+  const data = await res.json();
+  return (
+    data.choices?.[0]?.message?.content ||
+    "Не удалось получить ответ от AI"
+  );
 }
 
 export default function AiProcessPage() {
   const language = useI18nStore((state) => state.language);
   const tasks = useTaskStore((state) => state.tasks);
-
   const ru = language === "ru";
+
+  const activeTasks = tasks.filter((t) => t.status !== "done");
+
+  const tasksSummary =
+    activeTasks.length > 0
+      ? activeTasks
+          .map((t) => `- ${t.title} (приоритет: ${t.priority})`)
+          .join("\n")
+      : ru
+      ? "Задач пока нет"
+      : "No tasks yet";
 
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
       content: ru
-        ? "Привет! 👋 Я твой AI ассистент. Я вижу твои задачи и могу помочь тебе:\n\n• Оптимизировать их выполнение 🎯\n• Разбить сложные задачи на шаги 📋\n• Дать советы для снижения стресса 🧘\n\nСпроси меня что-нибудь!"
-        : "Hi! 👋 I'm your AI assistant. I can see your tasks and help you:\n\n• Optimize their execution 🎯\n• Break complex tasks into steps 📋\n• Give stress relief tips 🧘\n\nAsk me anything!",
+        ? "Привет! 👋 Я твой AI ассистент.\n\nЯ вижу твои задачи и могу помочь:\n• Оптимизировать их выполнение 🎯\n• Разбить сложные задачи на шаги 📋\n• Дать советы для снижения стресса 🧘\n\nСпроси меня что-нибудь!"
+        : "Hi! 👋 I'm your AI assistant.\n\nI can see your tasks and help:\n• Optimize execution 🎯\n• Break tasks into steps 📋\n• Reduce stress 🧘\n\nAsk me anything!",
     },
   ]);
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  const tasksSummary = tasks
-    .filter((t) => t.status !== "done")
-    .map((t) => `- ${t.title} (приоритет: ${t.priority})`)
-    .join("\n") || "Задач пока нет";
 
   const quickQuestions = ru
     ? [
@@ -92,34 +104,34 @@ export default function AiProcessPage() {
       ];
 
   const sendMessage = async (text?: string) => {
-    const messageText = text || input.trim();
+    const messageText = (text || input).trim();
     if (!messageText || loading) return;
 
     const userMessage: Message = { role: "user", content: messageText };
-    const newMessages = [...messages, userMessage];
+    const updatedMessages = [...messages, userMessage];
 
-    setMessages(newMessages);
+    setMessages(updatedMessages);
     setInput("");
     setLoading(true);
 
     try {
-      const response = await askDeepSeek(
-        newMessages.filter((m) => m.role !== "assistant" || newMessages.indexOf(m) > 0),
+      const reply = await askGroq(
+        updatedMessages.slice(1),
         tasksSummary
       );
-
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: response },
+        { role: "assistant", content: reply },
       ]);
-    } catch (err) {
+    } catch (err: any) {
+      console.error("AI error:", err);
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
           content: ru
-            ? "Произошла ошибка. Попробуй ещё раз 🙏"
-            : "An error occurred. Please try again 🙏",
+            ? `⚠️ Ошибка подключения к AI.\n\n${err?.message || ""}\n\nПроверь интернет и попробуй ещё раз.`
+            : `⚠️ AI connection error.\n\n${err?.message || ""}\n\nCheck internet and try again.`,
         },
       ]);
     } finally {
@@ -141,44 +153,46 @@ export default function AiProcessPage() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "10px",
+          gap: "12px",
           marginBottom: "16px",
-          padding: "0 4px",
         }}
       >
         <div
           style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "10px",
-            backgroundColor: "rgba(59,130,246,0.2)",
+            width: "40px",
+            height: "40px",
+            borderRadius: "12px",
+            backgroundColor: "rgba(59,130,246,0.15)",
+            border: "1px solid rgba(59,130,246,0.3)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
           }}
         >
-          <Bot size={20} color="#3b82f6" />
+          <Bot size={22} color="#3b82f6" />
         </div>
         <div>
           <p
             style={{
-              fontSize: "16px",
+              fontSize: "17px",
               fontWeight: 700,
               color: "white",
               margin: 0,
             }}
           >
-            AI Ассистент
+            AI {ru ? "Ассистент" : "Assistant"}
           </p>
           <p
             style={{
-              fontSize: "11px",
+              fontSize: "12px",
               color: "rgba(255,255,255,0.4)",
               margin: 0,
             }}
           >
-            {ru ? `${tasks.filter(t => t.status !== "done").length} активных задач` : `${tasks.filter(t => t.status !== "done").length} active tasks`}
+            {ru
+              ? `${activeTasks.length} активных задач`
+              : `${activeTasks.length} active tasks`}
           </p>
         </div>
       </div>
@@ -190,7 +204,7 @@ export default function AiProcessPage() {
             display: "flex",
             gap: "8px",
             overflowX: "auto",
-            marginBottom: "12px",
+            marginBottom: "14px",
             paddingBottom: "4px",
           }}
         >
@@ -200,14 +214,15 @@ export default function AiProcessPage() {
               onClick={() => sendMessage(q)}
               style={{
                 whiteSpace: "nowrap",
-                backgroundColor: "rgba(59,130,246,0.15)",
-                border: "1px solid rgba(59,130,246,0.3)",
+                backgroundColor: "rgba(59,130,246,0.12)",
+                border: "1px solid rgba(59,130,246,0.25)",
                 borderRadius: "20px",
-                padding: "6px 12px",
+                padding: "7px 14px",
                 fontSize: "12px",
                 color: "#93c5fd",
                 cursor: "pointer",
                 flexShrink: 0,
+                transition: "all 0.15s ease",
               }}
             >
               {q}
@@ -238,26 +253,30 @@ export default function AiProcessPage() {
             <div
               style={{
                 maxWidth: "85%",
-                padding: "10px 14px",
-                borderRadius: msg.role === "user"
-                  ? "18px 18px 4px 18px"
-                  : "18px 18px 18px 4px",
-                backgroundColor: msg.role === "user"
-                  ? "#3b82f6"
-                  : "rgba(255,255,255,0.08)",
-                border: msg.role === "assistant"
-                  ? "1px solid rgba(255,255,255,0.08)"
-                  : "none",
+                padding: "11px 15px",
+                borderRadius:
+                  msg.role === "user"
+                    ? "18px 18px 4px 18px"
+                    : "18px 18px 18px 4px",
+                backgroundColor:
+                  msg.role === "user"
+                    ? "#3b82f6"
+                    : "rgba(255,255,255,0.07)",
+                border:
+                  msg.role === "assistant"
+                    ? "1px solid rgba(255,255,255,0.08)"
+                    : "none",
               }}
             >
               <p
                 style={{
                   fontSize: "14px",
-                  color: msg.role === "user"
-                    ? "white"
-                    : "rgba(255,255,255,0.9)",
+                  color:
+                    msg.role === "user"
+                      ? "white"
+                      : "rgba(255,255,255,0.9)",
                   margin: 0,
-                  lineHeight: "1.5",
+                  lineHeight: "1.55",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                 }}
@@ -274,7 +293,7 @@ export default function AiProcessPage() {
               style={{
                 padding: "12px 16px",
                 borderRadius: "18px 18px 18px 4px",
-                backgroundColor: "rgba(255,255,255,0.08)",
+                backgroundColor: "rgba(255,255,255,0.07)",
                 border: "1px solid rgba(255,255,255,0.08)",
                 display: "flex",
                 alignItems: "center",
@@ -286,7 +305,12 @@ export default function AiProcessPage() {
                 color="rgba(255,255,255,0.5)"
                 style={{ animation: "spin 1s linear infinite" }}
               />
-              <span style={{ fontSize: "13px", color: "rgba(255,255,255,0.5)" }}>
+              <span
+                style={{
+                  fontSize: "13px",
+                  color: "rgba(255,255,255,0.5)",
+                }}
+              >
                 {ru ? "Думаю..." : "Thinking..."}
               </span>
             </div>
@@ -302,12 +326,11 @@ export default function AiProcessPage() {
           display: "flex",
           gap: "8px",
           alignItems: "flex-end",
-          paddingTop: "8px",
-          borderTop: "1px solid rgba(255,255,255,0.08)",
+          paddingTop: "10px",
+          borderTop: "1px solid rgba(255,255,255,0.07)",
         }}
       >
         <textarea
-          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -320,10 +343,10 @@ export default function AiProcessPage() {
           rows={1}
           style={{
             flex: 1,
-            backgroundColor: "rgba(255,255,255,0.08)",
-            border: "1px solid rgba(255,255,255,0.12)",
+            backgroundColor: "rgba(255,255,255,0.07)",
+            border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: "16px",
-            padding: "10px 14px",
+            padding: "11px 14px",
             fontSize: "14px",
             color: "white",
             outline: "none",
@@ -331,6 +354,7 @@ export default function AiProcessPage() {
             maxHeight: "100px",
             overflowY: "auto",
             boxSizing: "border-box",
+            fontFamily: "inherit",
           }}
         />
 
@@ -338,11 +362,14 @@ export default function AiProcessPage() {
           onClick={() => sendMessage()}
           disabled={!input.trim() || loading}
           style={{
-            width: "42px",
-            height: "42px",
-            minWidth: "42px",
+            width: "44px",
+            height: "44px",
+            minWidth: "44px",
             borderRadius: "50%",
-            backgroundColor: input.trim() && !loading ? "#3b82f6" : "rgba(255,255,255,0.1)",
+            backgroundColor:
+              input.trim() && !loading
+                ? "#3b82f6"
+                : "rgba(255,255,255,0.08)",
             border: "none",
             cursor: input.trim() && !loading ? "pointer" : "default",
             display: "flex",
@@ -360,6 +387,9 @@ export default function AiProcessPage() {
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
+        }
+        textarea::placeholder {
+          color: rgba(255,255,255,0.3);
         }
       `}</style>
     </div>
