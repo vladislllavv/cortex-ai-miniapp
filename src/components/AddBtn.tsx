@@ -1,8 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Plus } from "lucide-react";
 import { triggerHaptic } from "@/lib/telegram";
 import { t, useI18nStore } from "@/lib/i18n";
-import { TaskPriority, useTaskStore, checkSubscription } from "@/lib/store";
+import {
+  TaskPriority,
+  useTaskStore,
+  checkSubscription,
+  getTelegramUserId,
+} from "@/lib/store";
 
 const priorityOptions = [
   { value: "low" as TaskPriority, emoji: "🟢" },
@@ -14,6 +19,7 @@ export default function AddBtn() {
   const language = useI18nStore((state) => state.language);
   const addTask = useTaskStore((state) => state.addTask);
   const tasks = useTaskStore((state) => state.tasks);
+  const ru = language === "ru";
 
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
@@ -22,34 +28,10 @@ export default function AddBtn() {
   const [time, setTime] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [repeat, setRepeat] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const ru = language === "ru";
-
-  // Фикс скачков при появлении/скрытии клавиатуры
-  useEffect(() => {
-    if (!open) return;
-
-    const originalHeight = window.innerHeight;
-
-    const handleResize = () => {
-      const currentHeight = window.innerHeight;
-      const diff = originalHeight - currentHeight;
-
-      // Если клавиатура появилась — поднимаем контент
-      if (diff > 100) {
-        document.body.style.transform = `translateY(-${diff / 3}px)`;
-      } else {
-        document.body.style.transform = "translateY(0)";
-      }
-    };
-
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      document.body.style.transform = "translateY(0)";
-    };
-  }, [open]);
+  // Защита от двойного нажатия
+  const savingRef = useRef(false);
 
   const resetForm = () => {
     setTitle("");
@@ -58,10 +40,11 @@ export default function AddBtn() {
     setPriority("medium");
     setRepeat(false);
     setStep(1);
+    setSaving(false);
+    savingRef.current = false;
   };
 
   const handleClose = () => {
-    document.body.style.transform = "translateY(0)";
     setOpen(false);
     setTimeout(resetForm, 200);
   };
@@ -78,47 +61,66 @@ export default function AddBtn() {
   };
 
   const onSave = async () => {
+    // Защита от двойного нажатия
+    if (savingRef.current) return;
     const trimmed = title.trim();
     if (!trimmed) return;
 
-    if (tasks.length >= 5) {
-      const userId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id;
-      const hasSub = userId ? await checkSubscription(String(userId)) : false;
+    savingRef.current = true;
+    setSaving(true);
 
-      if (!hasSub) {
-        const tg = (window as any).Telegram?.WebApp;
-        tg?.showAlert(
-          ru
-            ? "У тебя уже 5 задач 📋\n\nНужна подписка (100 Stars/мес).\n\nНапиши боту /subscribe"
-            : "You have 5 tasks 📋\n\nSubscription needed.\n\nSend /subscribe to bot"
-        );
-        tg?.openTelegramLink("https://t.me/aiplannerrubot");
-        handleClose();
-        return;
+    try {
+      // Проверка лимита задач за сегодня
+      const todayStr = new Date().toISOString().split("T")[0];
+      const todayTasks = tasks.filter(
+        (t) => t.createdAt.startsWith(todayStr)
+      );
+
+      if (todayTasks.length >= 5) {
+        const userId = getTelegramUserId();
+        const hasSub = userId !== "unknown"
+          ? await checkSubscription(userId)
+          : false;
+
+        if (!hasSub) {
+          const tg = (window as any).Telegram?.WebApp;
+          tg?.showAlert(
+            ru
+              ? "Лимит 5 задач в день исчерпан 📋\n\nОформи подписку (100 Stars/мес) для неограниченного доступа.\n\nНапиши боту /subscribe"
+              : "Daily limit of 5 tasks reached 📋\n\nGet subscription (100 Stars/mo) for unlimited access.\n\nSend /subscribe to bot"
+          );
+          tg?.openTelegramLink("https://t.me/aiplannerrubot");
+          handleClose();
+          return;
+        }
       }
+
+      let dueDate: string | undefined;
+      if (date && time) {
+        const p = new Date(`${date}T${time}:00`);
+        if (!isNaN(p.getTime())) dueDate = p.toISOString();
+      } else if (date) {
+        const p = new Date(`${date}T09:00:00`);
+        if (!isNaN(p.getTime())) dueDate = p.toISOString();
+      }
+
+      // Мгновенное добавление
+      await addTask({
+        title: trimmed,
+        dueDate,
+        priority,
+        status: "todo",
+        isAiCreated: false,
+        repeat: repeat ? "daily" : "none",
+      });
+
+      triggerHaptic("success");
+      handleClose();
+    } catch (err) {
+      console.error("Save error:", err);
+      savingRef.current = false;
+      setSaving(false);
     }
-
-    let dueDate: string | undefined;
-
-    if (date && time) {
-      const p = new Date(`${date}T${time}:00`);
-      if (!isNaN(p.getTime())) dueDate = p.toISOString();
-    } else if (date) {
-      const p = new Date(`${date}T09:00:00`);
-      if (!isNaN(p.getTime())) dueDate = p.toISOString();
-    }
-
-    addTask({
-      title: trimmed,
-      dueDate,
-      priority,
-      status: "todo",
-      isAiCreated: false,
-      repeat: repeat ? "daily" : "none",
-    });
-
-    triggerHaptic("success");
-    handleClose();
   };
 
   if (!open) {
@@ -126,7 +128,7 @@ export default function AddBtn() {
       <button
         style={{
           position: "fixed",
-          bottom: "96px",
+          bottom: "90px",
           right: "16px",
           zIndex: 40,
           width: "56px",
@@ -139,8 +141,9 @@ export default function AddBtn() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          boxShadow: "0 8px 24px rgba(59,130,246,0.4)",
+          boxShadow: "0 4px 20px rgba(59,130,246,0.5)",
           transition: "transform 0.15s ease",
+          WebkitTapHighlightColor: "transparent",
         }}
         onClick={() => {
           triggerHaptic("light");
@@ -158,7 +161,7 @@ export default function AddBtn() {
         position: "fixed",
         inset: 0,
         zIndex: 50,
-        backgroundColor: "rgba(0,0,0,0.5)",
+        backgroundColor: "rgba(0,0,0,0.6)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -169,12 +172,14 @@ export default function AddBtn() {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: "280px",
-          backgroundColor: "#ffffff",
+          width: "100%",
+          maxWidth: "320px",
+          backgroundColor: "#1e293b",
           borderRadius: "20px",
-          padding: "16px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+          padding: "20px",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
           boxSizing: "border-box",
+          border: "1px solid rgba(255,255,255,0.08)",
         }}
       >
         {/* Индикатор шагов */}
@@ -183,10 +188,10 @@ export default function AddBtn() {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            marginBottom: "14px",
+            marginBottom: "16px",
           }}
         >
-          <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 500 }}>
+          <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", fontWeight: 500 }}>
             {ru ? `Шаг ${step}/2` : `Step ${step}/2`}
           </span>
           <div style={{ display: "flex", gap: "4px" }}>
@@ -195,9 +200,9 @@ export default function AddBtn() {
                 key={s}
                 style={{
                   height: "3px",
-                  width: "24px",
+                  width: "28px",
                   borderRadius: "2px",
-                  backgroundColor: step >= s ? "#3b82f6" : "#e2e8f0",
+                  backgroundColor: step >= s ? "#3b82f6" : "rgba(255,255,255,0.15)",
                   transition: "background-color 0.3s ease",
                 }}
               />
@@ -208,14 +213,7 @@ export default function AddBtn() {
         {/* ШАГ 1 */}
         {step === 1 && (
           <div>
-            <p
-              style={{
-                fontSize: "15px",
-                fontWeight: 700,
-                color: "#0f172a",
-                marginBottom: "12px",
-              }}
-            >
+            <p style={{ fontSize: "16px", fontWeight: 700, color: "white", marginBottom: "14px" }}>
               {ru ? "Что нужно сделать?" : "What to do?"}
             </p>
 
@@ -229,27 +227,21 @@ export default function AddBtn() {
                 display: "block",
                 width: "100%",
                 boxSizing: "border-box",
-                height: "42px",
+                height: "44px",
                 borderRadius: "12px",
-                border: "1.5px solid #e2e8f0",
-                backgroundColor: "#f8fafc",
-                paddingLeft: "12px",
-                paddingRight: "12px",
-                fontSize: "14px",
-                color: "#1e293b",
+                border: "1px solid rgba(255,255,255,0.1)",
+                backgroundColor: "rgba(255,255,255,0.07)",
+                paddingLeft: "14px",
+                paddingRight: "14px",
+                fontSize: "15px",
+                color: "white",
                 outline: "none",
-                marginBottom: "12px",
+                marginBottom: "14px",
+                fontFamily: "inherit",
               }}
             />
 
-            <p
-              style={{
-                fontSize: "11px",
-                fontWeight: 500,
-                color: "#94a3b8",
-                marginBottom: "6px",
-              }}
-            >
+            <p style={{ fontSize: "12px", fontWeight: 500, color: "rgba(255,255,255,0.4)", marginBottom: "8px" }}>
               {ru ? "Приоритет" : "Priority"}
             </p>
 
@@ -257,8 +249,8 @@ export default function AddBtn() {
               style={{
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr 1fr",
-                gap: "6px",
-                marginBottom: "14px",
+                gap: "8px",
+                marginBottom: "16px",
               }}
             >
               {priorityOptions.map(({ value, emoji }) => (
@@ -267,14 +259,14 @@ export default function AddBtn() {
                   type="button"
                   onClick={() => setPriority(value)}
                   style={{
-                    height: "36px",
+                    height: "38px",
                     borderRadius: "10px",
-                    border: "none",
-                    fontSize: "11px",
+                    border: priority === value ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.08)",
+                    fontSize: "12px",
                     fontWeight: 500,
                     cursor: "pointer",
-                    backgroundColor: priority === value ? "#3b82f6" : "#f1f5f9",
-                    color: priority === value ? "#ffffff" : "#475569",
+                    backgroundColor: priority === value ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)",
+                    color: priority === value ? "#60a5fa" : "rgba(255,255,255,0.5)",
                     transition: "all 0.15s ease",
                   }}
                 >
@@ -289,13 +281,13 @@ export default function AddBtn() {
                 onClick={handleClose}
                 style={{
                   flex: 1,
-                  height: "40px",
+                  height: "44px",
                   borderRadius: "12px",
-                  border: "1.5px solid #e2e8f0",
-                  backgroundColor: "#ffffff",
-                  fontSize: "13px",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  backgroundColor: "transparent",
+                  fontSize: "14px",
                   fontWeight: 500,
-                  color: "#64748b",
+                  color: "rgba(255,255,255,0.5)",
                   cursor: "pointer",
                 }}
               >
@@ -307,13 +299,13 @@ export default function AddBtn() {
                 disabled={!title.trim()}
                 style={{
                   flex: 1,
-                  height: "40px",
+                  height: "44px",
                   borderRadius: "12px",
                   border: "none",
-                  backgroundColor: title.trim() ? "#3b82f6" : "#cbd5e1",
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  color: "#ffffff",
+                  backgroundColor: title.trim() ? "#3b82f6" : "rgba(255,255,255,0.1)",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  color: "white",
                   cursor: title.trim() ? "pointer" : "default",
                   transition: "background-color 0.2s ease",
                 }}
@@ -327,25 +319,11 @@ export default function AddBtn() {
         {/* ШАГ 2 */}
         {step === 2 && (
           <div>
-            <p
-              style={{
-                fontSize: "15px",
-                fontWeight: 700,
-                color: "#0f172a",
-                marginBottom: "12px",
-              }}
-            >
+            <p style={{ fontSize: "16px", fontWeight: 700, color: "white", marginBottom: "14px" }}>
               {ru ? "Когда напомнить?" : "When to remind?"}
             </p>
 
-            <p
-              style={{
-                fontSize: "11px",
-                fontWeight: 500,
-                color: "#94a3b8",
-                marginBottom: "4px",
-              }}
-            >
+            <p style={{ fontSize: "12px", fontWeight: 500, color: "rgba(255,255,255,0.4)", marginBottom: "6px" }}>
               {ru ? "Дата" : "Date"}
             </p>
             <input
@@ -356,29 +334,24 @@ export default function AddBtn() {
                 display: "block",
                 width: "100%",
                 boxSizing: "border-box",
-                height: "42px",
+                height: "44px",
                 borderRadius: "12px",
-                border: "1.5px solid #e2e8f0",
-                backgroundColor: "#f8fafc",
-                paddingLeft: "12px",
-                paddingRight: "12px",
-                fontSize: "14px",
-                color: "#1e293b",
+                border: "1px solid rgba(255,255,255,0.1)",
+                backgroundColor: "rgba(255,255,255,0.07)",
+                paddingLeft: "14px",
+                paddingRight: "14px",
+                fontSize: "15px",
+                color: "white",
                 outline: "none",
-                marginBottom: "10px",
+                marginBottom: "12px",
                 appearance: "none",
                 WebkitAppearance: "none",
+                fontFamily: "inherit",
+                colorScheme: "dark",
               }}
             />
 
-            <p
-              style={{
-                fontSize: "11px",
-                fontWeight: 500,
-                color: "#94a3b8",
-                marginBottom: "4px",
-              }}
-            >
+            <p style={{ fontSize: "12px", fontWeight: 500, color: "rgba(255,255,255,0.4)", marginBottom: "6px" }}>
               {ru ? "Время" : "Time"}
             </p>
             <input
@@ -389,18 +362,20 @@ export default function AddBtn() {
                 display: "block",
                 width: "100%",
                 boxSizing: "border-box",
-                height: "42px",
+                height: "44px",
                 borderRadius: "12px",
-                border: "1.5px solid #e2e8f0",
-                backgroundColor: "#f8fafc",
-                paddingLeft: "12px",
-                paddingRight: "12px",
-                fontSize: "14px",
-                color: "#1e293b",
+                border: "1px solid rgba(255,255,255,0.1)",
+                backgroundColor: "rgba(255,255,255,0.07)",
+                paddingLeft: "14px",
+                paddingRight: "14px",
+                fontSize: "15px",
+                color: "white",
                 outline: "none",
-                marginBottom: "10px",
+                marginBottom: "12px",
                 appearance: "none",
                 WebkitAppearance: "none",
+                fontFamily: "inherit",
+                colorScheme: "dark",
               }}
             />
 
@@ -410,24 +385,16 @@ export default function AddBtn() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                backgroundColor: "#f8fafc",
+                backgroundColor: "rgba(255,255,255,0.05)",
                 borderRadius: "12px",
-                padding: "10px 12px",
-                marginBottom: "14px",
-                boxSizing: "border-box",
+                padding: "12px 14px",
+                marginBottom: "16px",
+                border: "1px solid rgba(255,255,255,0.08)",
               }}
             >
-              <p
-                style={{
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  color: "#1e293b",
-                  margin: 0,
-                }}
-              >
+              <p style={{ fontSize: "14px", fontWeight: 500, color: "rgba(255,255,255,0.8)", margin: 0 }}>
                 🔁 {ru ? "Каждый день" : "Daily"}
               </p>
-
               <div
                 onClick={() => setRepeat(!repeat)}
                 style={{
@@ -436,7 +403,7 @@ export default function AddBtn() {
                   minWidth: "44px",
                   height: "24px",
                   borderRadius: "12px",
-                  backgroundColor: repeat ? "#3b82f6" : "#cbd5e1",
+                  backgroundColor: repeat ? "#3b82f6" : "rgba(255,255,255,0.15)",
                   cursor: "pointer",
                   transition: "background-color 0.2s ease",
                   flexShrink: 0,
@@ -450,8 +417,8 @@ export default function AddBtn() {
                     width: "20px",
                     height: "20px",
                     borderRadius: "50%",
-                    backgroundColor: "#ffffff",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                    backgroundColor: "white",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
                     transition: "left 0.2s ease",
                   }}
                 />
@@ -463,18 +430,18 @@ export default function AddBtn() {
                 type="button"
                 onClick={handleBack}
                 style={{
-                  width: "42px",
-                  minWidth: "42px",
-                  height: "40px",
+                  width: "44px",
+                  minWidth: "44px",
+                  height: "44px",
                   borderRadius: "12px",
-                  border: "1.5px solid #e2e8f0",
-                  backgroundColor: "#ffffff",
-                  fontSize: "16px",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  backgroundColor: "transparent",
+                  fontSize: "18px",
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: "#64748b",
+                  color: "rgba(255,255,255,0.5)",
                 }}
               >
                 ←
@@ -482,19 +449,27 @@ export default function AddBtn() {
               <button
                 type="button"
                 onClick={onSave}
+                disabled={saving}
                 style={{
                   flex: 1,
-                  height: "40px",
+                  height: "44px",
                   borderRadius: "12px",
                   border: "none",
-                  backgroundColor: "#3b82f6",
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  color: "#ffffff",
-                  cursor: "pointer",
+                  backgroundColor: saving ? "rgba(59,130,246,0.5)" : "#3b82f6",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  color: "white",
+                  cursor: saving ? "default" : "pointer",
+                  transition: "background-color 0.2s ease",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "6px",
                 }}
               >
-                {ru ? "Создать ✅" : "Create ✅"}
+                {saving
+                  ? (ru ? "Сохраняю..." : "Saving...")
+                  : (ru ? "Создать ✅" : "Create ✅")}
               </button>
             </div>
           </div>
