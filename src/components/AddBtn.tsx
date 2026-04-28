@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 import { triggerHaptic } from "@/lib/telegram";
-import { Button } from "@/components/ui/button";
 import { t, useI18nStore } from "@/lib/i18n";
 import { TaskPriority, useTaskStore, checkSubscription } from "@/lib/store";
 
@@ -9,6 +8,7 @@ export default function AddBtn() {
   const language = useI18nStore((state) => state.language);
   const addTask = useTaskStore((state) => state.addTask);
   const tasks = useTaskStore((state) => state.tasks);
+
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
@@ -47,6 +47,7 @@ export default function AddBtn() {
     }
 
     let dueDate: string | undefined;
+
     if (date && time) {
       const parsed = new Date(`${date}T${time}:00`);
       if (!isNaN(parsed.getTime())) {
@@ -76,61 +77,56 @@ export default function AddBtn() {
     <>
       {open ? (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3"
           onClick={handleClose}
         >
           <div
-            className="w-full max-w-md rounded-2xl bg-white p-5 space-y-4"
+            className="w-full max-w-[360px] max-h-[80vh] overflow-y-auto rounded-2xl bg-white p-4 space-y-3 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Заголовок */}
-            <h3 className="text-base font-bold text-slate-900">
+            <h3 className="text-sm font-bold text-slate-900">
               {t(language, "createTask")}
             </h3>
 
-            {/* Название задачи */}
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-500">
+              <label className="text-[11px] font-medium text-slate-500">
                 {t(language, "taskTitle")}
               </label>
               <input
                 autoFocus
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 placeholder={t(language, "taskTitlePlaceholder")}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
             </div>
 
-            {/* Дата */}
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-500">
+              <label className="text-[11px] font-medium text-slate-500">
                 {t(language, "reminderDate")}
               </label>
               <input
                 type="date"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
               />
             </div>
 
-            {/* Время */}
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-500">
+              <label className="text-[11px] font-medium text-slate-500">
                 {t(language, "reminderTime")}
               </label>
               <input
                 type="time"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
               />
             </div>
 
-            {/* Приоритет */}
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-500">
+              <label className="text-[11px] font-medium text-slate-500">
                 {t(language, "urgency")}
               </label>
               <div className="grid grid-cols-3 gap-2">
@@ -138,7 +134,7 @@ export default function AddBtn() {
                   <button
                     key={value}
                     onClick={() => setPriority(value)}
-                    className={`rounded-xl py-2 text-sm font-medium transition-colors ${
+                    className={`rounded-xl py-2 text-xs font-medium transition-colors ${
                       priority === value
                         ? "bg-blue-500 text-white"
                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -150,18 +146,18 @@ export default function AddBtn() {
               </div>
             </div>
 
-            {/* Ежедневный повтор */}
-            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3">
-              <div>
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
+              <div className="pr-3">
                 <p className="text-sm font-medium text-slate-800">
                   🔁 {language === "ru" ? "Ежедневный повтор" : "Daily repeat"}
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-[11px] text-slate-500">
                   {language === "ru"
-                    ? "Задача будет повторяться каждый день"
-                    : "Task will repeat every day"}
+                    ? "Повторять задачу каждый день"
+                    : "Repeat task every day"}
                 </p>
               </div>
+
               <button
                 onClick={() => setRepeat(!repeat)}
                 className={`relative h-6 w-11 rounded-full transition-colors ${
@@ -176,18 +172,17 @@ export default function AddBtn() {
               </button>
             </div>
 
-            {/* Кнопки */}
-            <div className="flex gap-3 pt-1">
+            <div className="flex gap-2 pt-1">
               <button
                 onClick={handleClose}
-                className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
               >
                 {t(language, "cancel")}
               </button>
               <button
                 onClick={onSave}
                 disabled={!title.trim()}
-                className="flex-1 rounded-xl bg-blue-500 py-3 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-40"
+                className="flex-1 rounded-xl bg-blue-500 py-2.5 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-40"
               >
                 {t(language, "saveTask")}
               </button>
@@ -196,7 +191,6 @@ export default function AddBtn() {
         </div>
       ) : null}
 
-      {/* Кнопка + */}
       <button
         className="fixed bottom-24 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-blue-500 text-white shadow-2xl hover:bg-blue-600 transition-colors"
         aria-label="Add task"
