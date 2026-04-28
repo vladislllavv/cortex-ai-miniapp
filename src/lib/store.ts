@@ -23,7 +23,7 @@ export type Task = {
 type TaskStore = {
   tasks: Task[];
   selectedDate: string | null;
-  addTask: (task: Omit<Task, "id" | "createdAt" | "notified">) => void;
+  addTask: (task: Omit<Task, "id" | "createdAt" | "notified">) => Promise<void>;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
   toggleTaskStatus: (taskId: string) => void;
@@ -31,48 +31,51 @@ type TaskStore = {
 };
 
 const STORAGE_KEY = "cortex-tasks";
+const CHAT_STORAGE_KEY = "cortex-ai-chat";
 
-function getTelegramUserId(): string {
+// Хранение истории чата
+export function saveChatHistory(messages: { role: string; content: string }[]) {
+  try {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
+  } catch {}
+}
+
+export function loadChatHistory(): { role: string; content: string }[] {
+  try {
+    const stored = localStorage.getItem(CHAT_STORAGE_KEY);
+    if (stored) return JSON.parse(stored);
+  } catch {}
+  return [];
+}
+
+export function getTelegramUserId(): string {
   try {
     const tg = (window as any).Telegram?.WebApp;
     if (!tg) return "unknown";
-
-    if (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.id) {
+    if (tg.initDataUnsafe?.user?.id) {
       return String(tg.initDataUnsafe.user.id);
     }
-  } catch (e) {
-    console.error("Error getting Telegram ID:", e);
-  }
-
+  } catch {}
   return "unknown";
 }
 
-// Проверка подписки
 export async function checkSubscription(userId: string): Promise<boolean> {
   try {
+    if (userId === "unknown") return false;
     const subDoc = await getDoc(doc(db, "subscriptions", userId));
-
     if (!subDoc.exists()) return false;
-
     const data = subDoc.data();
-
     if (!data.isActive || !data.expiresAt) return false;
-
-    const expiresAt = data.expiresAt.toDate();
-    const now = new Date();
-
-    return expiresAt > now;
-  } catch (e) {
-    console.error("Subscription check error:", e);
+    return data.expiresAt.toDate() > new Date();
+  } catch {
     return false;
   }
 }
 
-// Нормализация старых задач, чтобы не ломались после добавления repeat
 function normalizeTask(task: any): Task {
   return {
-    id: task.id,
-    title: task.title,
+    id: task.id || crypto.randomUUID(),
+    title: task.title || "",
     description: task.description || "",
     dueDate: task.dueDate,
     priority: task.priority || "medium",
@@ -86,37 +89,26 @@ function normalizeTask(task: any): Task {
 
 function loadTasks(): Task[] {
   if (typeof window === "undefined") return [];
-
   try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-
+    const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) {
-        return parsed.map(normalizeTask);
-      }
+      if (Array.isArray(parsed)) return parsed.map(normalizeTask);
     }
-  } catch (e) {
-    console.error("Failed to load tasks:", e);
-  }
-
+  } catch {}
   return [];
 }
 
 function saveTasks(tasks: Task[]) {
   if (typeof window === "undefined") return;
-
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-  } catch (e) {
-    console.error("Failed to save tasks:", e);
-  }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  } catch {}
 }
 
 async function saveTaskToFirebase(task: Task) {
   try {
     const userId = getTelegramUserId();
-
     let reminderAt = null;
     if (task.dueDate) {
       const date = new Date(task.dueDate);
@@ -124,9 +116,8 @@ async function saveTaskToFirebase(task: Task) {
         reminderAt = Timestamp.fromDate(date);
       }
     }
-
     await addDoc(collection(db, "tasks"), {
-      userId: userId,
+      userId,
       taskId: task.id,
       title: task.title,
       description: task.description || "",
@@ -135,71 +126,61 @@ async function saveTaskToFirebase(task: Task) {
       status: task.status,
       createdAt: task.createdAt,
       isSent: false,
-      reminderAt: reminderAt,
-      repeat: task.repeat || "none"
+      reminderAt,
+      repeat: task.repeat || "none",
     });
-
-    console.log("Задача сохранена в Firebase ✅");
   } catch (e: any) {
-    console.error("Ошибка сохранения в Firebase:", e.message);
+    console.error("Firebase save error:", e.message);
   }
 }
 
-export const useTaskStore = create<TaskStore>((set) => ({
+export const useTaskStore = create<TaskStore>((set, get) => ({
   tasks: loadTasks(),
   selectedDate: null,
 
-  addTask: (task) => {
-    const dueDate = task.dueDate || new Date().toISOString();
-
+  addTask: async (task) => {
     const newTask: Task = {
       ...task,
-      dueDate,
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       notified: false,
       repeat: task.repeat || "none",
     };
 
+    // Добавляем мгновенно в UI
     set((state) => {
       const updated = [newTask, ...state.tasks];
       saveTasks(updated);
       return { tasks: updated };
     });
 
-    saveTaskToFirebase(newTask);
+    // Сохраняем в Firebase асинхронно
+    saveTaskToFirebase(newTask).catch(console.error);
   },
 
   updateTask: (taskId, updates) =>
     set((state) => {
-      const updated = state.tasks.map((task) =>
-        task.id === taskId
-          ? normalizeTask({ ...task, ...updates })
-          : task
+      const updated = state.tasks.map((t) =>
+        t.id === taskId ? normalizeTask({ ...t, ...updates }) : t
       );
-
       saveTasks(updated);
       return { tasks: updated };
     }),
 
   deleteTask: (taskId) =>
     set((state) => {
-      const updated = state.tasks.filter((task) => task.id !== taskId);
+      const updated = state.tasks.filter((t) => t.id !== taskId);
       saveTasks(updated);
       return { tasks: updated };
     }),
 
   toggleTaskStatus: (taskId) =>
     set((state) => {
-      const updated = state.tasks.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
-              status: (task.status === "done" ? "todo" : "done") as TaskStatus,
-            }
-          : task
+      const updated = state.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, status: (t.status === "done" ? "todo" : "done") as TaskStatus }
+          : t
       );
-
       saveTasks(updated);
       return { tasks: updated };
     }),
@@ -210,10 +191,8 @@ export const useTaskStore = create<TaskStore>((set) => ({
 export function usePersistTasks() {
   useEffect(() => {
     const stored = loadTasks();
-
     if (stored.length > 0) {
       const current = useTaskStore.getState().tasks;
-
       if (current.length === 0) {
         useTaskStore.setState({ tasks: stored });
       }
