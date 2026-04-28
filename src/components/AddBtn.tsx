@@ -3,23 +3,40 @@ import { Plus } from "lucide-react";
 import { triggerHaptic } from "@/lib/telegram";
 import { Button } from "@/components/ui/button";
 import { t, useI18nStore } from "@/lib/i18n";
-import { TaskPriority, useTaskStore } from "@/lib/store";
+import { TaskPriority, useTaskStore, checkSubscription } from "@/lib/store";
 import { Card } from "@/components/ui/card";
 
 export default function AddBtn() {
   const language = useI18nStore((state) => state.language);
   const addTask = useTaskStore((state) => state.addTask);
+  const tasks = useTaskStore((state) => state.tasks);
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
 
-  const onSave = () => {
-    console.log("Кнопка сохранения нажата ✅");
-
+  const onSave = async () => {
     const trimmed = title.trim();
     if (!trimmed) return;
+
+    // Если задач 5 или больше — проверяем подписку
+    if (tasks.length >= 5) {
+      const userId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id;
+      const hasSubscription = userId
+        ? await checkSubscription(String(userId))
+        : false;
+
+      if (!hasSubscription) {
+        const tg = (window as any).Telegram?.WebApp;
+        tg?.showAlert(
+          "У тебя уже 5 задач 📋\n\nДля добавления большего количества нужна подписка.\n\n💫 100 Stars в месяц\n\nНапиши боту /subscribe для оплаты."
+        );
+        tg?.openTelegramLink("https://t.me/aiplannerrubot");
+        setOpen(false);
+        return;
+      }
+    }
 
     let dueDate: string | undefined;
     if (date && time) {
@@ -33,8 +50,6 @@ export default function AddBtn() {
         dueDate = parsed.toISOString();
       }
     }
-
-    console.log("dueDate:", dueDate);
 
     addTask({
       title: trimmed,
