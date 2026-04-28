@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Home, Calendar, Bot, Settings } from "lucide-react";
 import HomePage from "@/pages/HomePage";
 import CalendarPage from "@/pages/CalendarPage";
@@ -17,6 +17,27 @@ export default function App() {
 
   usePersistTasks();
 
+  // Раскрываем Telegram Mini App на весь экран
+  useEffect(() => {
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      if (tg) {
+        tg.expand();
+        tg.ready();
+      }
+    } catch {}
+
+    // Фиксим высоту для мобильных
+    const setHeight = () => {
+      const vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty("--vh", `${vh}px`);
+    };
+
+    setHeight();
+    window.addEventListener("resize", setHeight);
+    return () => window.removeEventListener("resize", setHeight);
+  }, []);
+
   const tabs = [
     { id: "home" as Tab, icon: Home, label: ru ? "Главная" : "Home" },
     { id: "calendar" as Tab, icon: Calendar, label: ru ? "Календарь" : "Calendar" },
@@ -25,99 +46,121 @@ export default function App() {
   ];
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        backgroundColor: "#0f172a",
-        color: "white",
-        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-        overflowX: "hidden",
-      }}
-    >
-      {/* Контент */}
-      <div
-        style={{
-          padding: "16px 16px 90px 16px",
-          width: "100%",
-          boxSizing: "border-box",
-          maxWidth: "480px",
-          margin: "0 auto",
-          minHeight: "100vh",
-        }}
-      >
-        {tab === "home" && <HomePage />}
-        {tab === "calendar" && <CalendarPage />}
-        {tab === "ai" && <AiProcessPage />}
-        {tab === "settings" && <SettingsPage />}
-      </div>
+    <>
+      <style>{`
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        html, body, #root {
+          height: 100%;
+          overflow: hidden;
+          background-color: #0f172a;
+        }
+      `}</style>
 
-      {/* Кнопка + только на главной */}
-      {tab === "home" && <AddBtn />}
-
-      {/* Нижняя навигация */}
       <div
         style={{
           position: "fixed",
-          bottom: 0,
+          top: 0,
           left: 0,
           right: 0,
-          zIndex: 30,
-          backgroundColor: "rgba(10,15,30,0.97)",
-          borderTop: "1px solid rgba(255,255,255,0.07)",
-          backdropFilter: "blur(20px)",
-          WebkitBackdropFilter: "blur(20px)",
+          bottom: 0,
+          backgroundColor: "#0f172a",
+          color: "white",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
         }}
       >
+        {/* Основной контент — прокручивается */}
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-around",
-            alignItems: "center",
-            maxWidth: "480px",
-            margin: "0 auto",
-            padding: "10px 0 20px 0",
+            flex: 1,
+            overflowY: "auto",
+            overflowX: "hidden",
+            WebkitOverflowScrolling: "touch",
+            paddingBottom: "80px",
           }}
         >
-          {tabs.map(({ id, icon: Icon, label }) => {
-            const isActive = tab === id;
-            return (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: "4px",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "6px 20px",
-                  borderRadius: "14px",
-                  transition: "all 0.2s ease",
-                  WebkitTapHighlightColor: "transparent",
-                }}
-              >
-                <Icon
-                  size={24}
-                  color={isActive ? "#3b82f6" : "rgba(255,255,255,0.35)"}
-                  strokeWidth={isActive ? 2.5 : 1.8}
-                />
-                <span
+          <div
+            style={{
+              padding: "12px 16px 16px 16px",
+              maxWidth: "480px",
+              margin: "0 auto",
+              width: "100%",
+              boxSizing: "border-box",
+            }}
+          >
+            {tab === "home" && <HomePage />}
+            {tab === "calendar" && <CalendarPage />}
+            {tab === "ai" && <AiProcessPage />}
+            {tab === "settings" && <SettingsPage />}
+          </div>
+        </div>
+
+        {/* Кнопка + только на главной */}
+        {tab === "home" && <AddBtn />}
+
+        {/* Нижняя навигация — ВСЕГДА на месте */}
+        <div
+          style={{
+            position: "relative",
+            flexShrink: 0,
+            backgroundColor: "rgba(10,15,30,0.98)",
+            borderTop: "1px solid rgba(255,255,255,0.07)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-around",
+              alignItems: "center",
+              maxWidth: "480px",
+              margin: "0 auto",
+              padding: "8px 0 24px 0",
+            }}
+          >
+            {tabs.map(({ id, icon: Icon, label }) => {
+              const isActive = tab === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setTab(id)}
                   style={{
-                    fontSize: "11px",
-                    fontWeight: isActive ? 600 : 400,
-                    color: isActive ? "#3b82f6" : "rgba(255,255,255,0.35)",
-                    transition: "all 0.2s ease",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "3px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "6px 16px",
+                    WebkitTapHighlightColor: "transparent",
                   }}
                 >
-                  {label}
-                </span>
-              </button>
-            );
-          })}
+                  <Icon
+                    size={22}
+                    color={isActive ? "#3b82f6" : "rgba(255,255,255,0.35)"}
+                    strokeWidth={isActive ? 2.5 : 1.8}
+                  />
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: isActive ? 600 : 400,
+                      color: isActive ? "#3b82f6" : "rgba(255,255,255,0.35)",
+                    }}
+                  >
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
