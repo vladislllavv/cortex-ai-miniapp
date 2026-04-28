@@ -22,6 +22,10 @@ bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, "Привет! Я буду напоминать тебе о задачах 🔔");
 });
 
+bot.onText(/\/appss_verify/, (msg) => {
+  bot.sendMessage(msg.chat.id, "appss_73be81");
+});
+
 async function checkReminders() {
   try {
     const now = new Date();
