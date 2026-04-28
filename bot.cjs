@@ -8,6 +8,7 @@ const {
   getDocs,
   updateDoc,
   setDoc,
+  addDoc,
   doc,
   Timestamp
 } = require('firebase/firestore');
@@ -27,7 +28,7 @@ const db = getFirestore(firebaseApp);
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Твои админы — им подписка бесплатна
+// Список администраторов
 const ADMINS = ["56733076"];
 
 bot.setMyCommands([
@@ -73,17 +74,17 @@ bot.onText(/\/start/, async (msg) => {
   );
 });
 
-// Команда для Appss.pro
+// /appss_verify
 bot.onText(/\/appss_verify/, (msg) => {
   bot.sendMessage(msg.chat.id, "appss_73be81");
 });
 
-// /myid — показать ID пользователя
+// /myid
 bot.onText(/\/myid/, (msg) => {
   bot.sendMessage(msg.chat.id, `Твой Telegram ID: ${msg.chat.id}`);
 });
 
-// /gift 123456789 — выдать подписку пользователю
+// /gift
 bot.onText(/\/gift (.+)/, async (msg, match) => {
   const senderId = String(msg.chat.id);
 
@@ -96,8 +97,7 @@ bot.onText(/\/gift (.+)/, async (msg, match) => {
 
   try {
     await grantSubscription(targetUserId, 3650, true);
-
-    await bot.sendMessage(msg.chat.id, `✅ Бесплатная подписка выдана пользователю ${targetUserId}`);
+    await bot.sendMessage(msg.chat.id, `✅ Подписка выдана пользователю ${targetUserId}`);
 
     try {
       await bot.sendMessage(
@@ -112,7 +112,7 @@ bot.onText(/\/gift (.+)/, async (msg, match) => {
   }
 });
 
-// /revoke 123456789 — отключить подписку
+// /revoke
 bot.onText(/\/revoke (.+)/, async (msg, match) => {
   const senderId = String(msg.chat.id);
 
@@ -136,7 +136,7 @@ bot.onText(/\/revoke (.+)/, async (msg, match) => {
   }
 });
 
-// /subscribe — купить подписку
+// /subscribe
 bot.onText(/\/subscribe/, async (msg) => {
   const chatId = msg.chat.id;
   const userId = String(chatId);
@@ -173,7 +173,6 @@ bot.on("successful_payment", async (msg) => {
 
   try {
     await grantSubscription(userId, 30, false);
-
     console.log(`Подписка активирована для ${userId}`);
 
     bot.sendMessage(
@@ -185,7 +184,34 @@ bot.on("successful_payment", async (msg) => {
   }
 });
 
-// Проверка напоминаний
+// Создать повторяющуюся задачу на следующий день
+async function createNextDailyTask(task) {
+  try {
+    const oldDate = new Date(task.reminderAt.toDate());
+    const nextDate = new Date(oldDate);
+    nextDate.setDate(nextDate.getDate() + 1);
+
+    await addDoc(collection(db, "tasks"), {
+      userId: task.userId,
+      taskId: `daily_${Date.now()}`,
+      title: task.title,
+      description: task.description || "",
+      dueDate: nextDate.toISOString(),
+      priority: task.priority || "medium",
+      status: "todo",
+      createdAt: new Date().toISOString(),
+      isSent: false,
+      reminderAt: Timestamp.fromDate(nextDate),
+      repeat: "daily"
+    });
+
+    console.log(`Создана повторяющаяся задача для ${task.userId}: ${task.title}`);
+  } catch (err) {
+    console.log(`Ошибка создания повторяющейся задачи: ${err.message}`);
+  }
+}
+
+// Проверка напоминаний каждую минуту
 async function checkReminders() {
   try {
     const now = new Date();
@@ -203,16 +229,24 @@ async function checkReminders() {
       const task = documentSnapshot.data();
 
       try {
+        // Отправляем уведомление
         await bot.sendMessage(
           task.userId,
-          `🔔 Напоминание!\n\n📌 ${task.title}\n${task.description ? task.description : ""}`
+          `🔔 Напоминание!\n\n📌 ${task.title}${task.description ? `\n${task.description}` : ""}${task.repeat === "daily" ? "\n\n🔁 Ежедневная задача" : ""}`
         );
 
+        // Отмечаем как отправленное
         await updateDoc(doc(db, "tasks", documentSnapshot.id), {
           isSent: true
         });
 
         console.log(`Уведомление отправлено пользователю ${task.userId}`);
+
+        // Если задача ежедневная — создаём новую на завтра
+        if (task.repeat === "daily") {
+          await createNextDailyTask(task);
+        }
+
       } catch (err) {
         console.log(`Ошибка отправки: ${err.message}`);
       }
