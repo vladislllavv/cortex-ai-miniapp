@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { triggerHaptic } from "@/lib/telegram";
 import { t, useI18nStore } from "@/lib/i18n";
@@ -25,6 +25,32 @@ export default function AddBtn() {
 
   const ru = language === "ru";
 
+  // Фикс скачков при появлении/скрытии клавиатуры
+  useEffect(() => {
+    if (!open) return;
+
+    const originalHeight = window.innerHeight;
+
+    const handleResize = () => {
+      const currentHeight = window.innerHeight;
+      const diff = originalHeight - currentHeight;
+
+      // Если клавиатура появилась — поднимаем контент
+      if (diff > 100) {
+        document.body.style.transform = `translateY(-${diff / 3}px)`;
+      } else {
+        document.body.style.transform = "translateY(0)";
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      document.body.style.transform = "translateY(0)";
+    };
+  }, [open]);
+
   const resetForm = () => {
     setTitle("");
     setDate("");
@@ -35,6 +61,7 @@ export default function AddBtn() {
   };
 
   const handleClose = () => {
+    document.body.style.transform = "translateY(0)";
     setOpen(false);
     setTimeout(resetForm, 200);
   };
@@ -63,7 +90,7 @@ export default function AddBtn() {
         tg?.showAlert(
           ru
             ? "У тебя уже 5 задач 📋\n\nНужна подписка (100 Stars/мес).\n\nНапиши боту /subscribe"
-            : "You have 5 tasks 📋\n\nSubscription needed (100 Stars/mo).\n\nSend /subscribe to the bot"
+            : "You have 5 tasks 📋\n\nSubscription needed.\n\nSend /subscribe to bot"
         );
         tg?.openTelegramLink("https://t.me/aiplannerrubot");
         handleClose();
@@ -97,334 +124,381 @@ export default function AddBtn() {
   if (!open) {
     return (
       <button
-        className="fixed bottom-24 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-blue-500 text-white shadow-2xl active:scale-95 transition-transform"
-        aria-label="Add task"
+        style={{
+          position: "fixed",
+          bottom: "96px",
+          right: "16px",
+          zIndex: 40,
+          width: "56px",
+          height: "56px",
+          borderRadius: "50%",
+          backgroundColor: "#3b82f6",
+          color: "white",
+          border: "none",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 8px 24px rgba(59,130,246,0.4)",
+          transition: "transform 0.15s ease",
+        }}
         onClick={() => {
           triggerHaptic("light");
           setOpen(true);
         }}
       >
-        <Plus className="h-6 w-6" />
+        <Plus size={24} />
       </button>
     );
   }
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 transition-opacity duration-200"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        backgroundColor: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
       onClick={handleClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "280px",
-          minHeight: "280px",
+          backgroundColor: "#ffffff",
+          borderRadius: "20px",
+          padding: "16px",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+          boxSizing: "border-box",
         }}
-        className="rounded-2xl bg-white shadow-2xl overflow-hidden transition-all duration-200"
       >
-        {/* Контент с фиксированными отступами */}
-        <div className="p-4">
-
-          {/* Индикатор шагов */}
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[11px] font-medium text-slate-400">
-              {ru ? `Шаг ${step}/2` : `Step ${step}/2`}
-            </span>
-            <div className="flex gap-1">
+        {/* Индикатор шагов */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "14px",
+          }}
+        >
+          <span style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 500 }}>
+            {ru ? `Шаг ${step}/2` : `Step ${step}/2`}
+          </span>
+          <div style={{ display: "flex", gap: "4px" }}>
+            {[1, 2].map((s) => (
               <div
-                className="h-1 w-6 rounded-full transition-colors duration-300"
-                style={{ backgroundColor: step >= 1 ? "#3b82f6" : "#e2e8f0" }}
+                key={s}
+                style={{
+                  height: "3px",
+                  width: "24px",
+                  borderRadius: "2px",
+                  backgroundColor: step >= s ? "#3b82f6" : "#e2e8f0",
+                  transition: "background-color 0.3s ease",
+                }}
               />
-              <div
-                className="h-1 w-6 rounded-full transition-colors duration-300"
-                style={{ backgroundColor: step >= 2 ? "#3b82f6" : "#e2e8f0" }}
-              />
-            </div>
+            ))}
           </div>
+        </div>
 
-          {/* ============ ШАГ 1 ============ */}
-          {step === 1 && (
-            <div>
-              <p className="text-sm font-bold text-slate-900 mb-3">
-                {ru ? "Что нужно сделать?" : "What to do?"}
-              </p>
+        {/* ШАГ 1 */}
+        {step === 1 && (
+          <div>
+            <p
+              style={{
+                fontSize: "15px",
+                fontWeight: 700,
+                color: "#0f172a",
+                marginBottom: "12px",
+              }}
+            >
+              {ru ? "Что нужно сделать?" : "What to do?"}
+            </p>
 
-              {/* Название */}
-              <input
-                autoFocus
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleNext()}
-                placeholder={ru ? "Название задачи..." : "Task title..."}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  boxSizing: "border-box",
-                  height: "40px",
-                  borderRadius: "12px",
-                  border: "1px solid #e2e8f0",
-                  backgroundColor: "#f8fafc",
-                  paddingLeft: "12px",
-                  paddingRight: "12px",
-                  fontSize: "14px",
-                  color: "#1e293b",
-                  outline: "none",
-                  marginBottom: "12px",
-                }}
-              />
+            <input
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleNext()}
+              placeholder={ru ? "Название задачи..." : "Task title..."}
+              style={{
+                display: "block",
+                width: "100%",
+                boxSizing: "border-box",
+                height: "42px",
+                borderRadius: "12px",
+                border: "1.5px solid #e2e8f0",
+                backgroundColor: "#f8fafc",
+                paddingLeft: "12px",
+                paddingRight: "12px",
+                fontSize: "14px",
+                color: "#1e293b",
+                outline: "none",
+                marginBottom: "12px",
+              }}
+            />
 
-              {/* Приоритет */}
-              <p
-                style={{
-                  fontSize: "11px",
-                  fontWeight: 500,
-                  color: "#94a3b8",
-                  marginBottom: "6px",
-                }}
-              >
-                {ru ? "Приоритет" : "Priority"}
-              </p>
+            <p
+              style={{
+                fontSize: "11px",
+                fontWeight: 500,
+                color: "#94a3b8",
+                marginBottom: "6px",
+              }}
+            >
+              {ru ? "Приоритет" : "Priority"}
+            </p>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr 1fr",
-                  gap: "6px",
-                  marginBottom: "16px",
-                }}
-              >
-                {priorityOptions.map(({ value, emoji }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setPriority(value)}
-                    style={{
-                      height: "36px",
-                      borderRadius: "12px",
-                      border: "none",
-                      fontSize: "11px",
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      backgroundColor: priority === value ? "#3b82f6" : "#f1f5f9",
-                      color: priority === value ? "#ffffff" : "#475569",
-                      transition: "all 0.15s ease",
-                    }}
-                  >
-                    {emoji} {t(language, value)}
-                  </button>
-                ))}
-              </div>
-
-              {/* Кнопки */}
-              <div style={{ display: "flex", gap: "8px" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: "6px",
+                marginBottom: "14px",
+              }}
+            >
+              {priorityOptions.map(({ value, emoji }) => (
                 <button
+                  key={value}
                   type="button"
-                  onClick={handleClose}
+                  onClick={() => setPriority(value)}
                   style={{
-                    flex: 1,
-                    height: "40px",
-                    borderRadius: "12px",
-                    border: "1px solid #e2e8f0",
-                    backgroundColor: "#ffffff",
-                    fontSize: "13px",
-                    fontWeight: 500,
-                    color: "#64748b",
-                    cursor: "pointer",
-                  }}
-                >
-                  {ru ? "Отмена" : "Cancel"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleNext}
-                  disabled={!title.trim()}
-                  style={{
-                    flex: 1,
-                    height: "40px",
-                    borderRadius: "12px",
+                    height: "36px",
+                    borderRadius: "10px",
                     border: "none",
-                    backgroundColor: title.trim() ? "#3b82f6" : "#94a3b8",
-                    fontSize: "13px",
+                    fontSize: "11px",
                     fontWeight: 500,
-                    color: "#ffffff",
-                    cursor: title.trim() ? "pointer" : "default",
-                    opacity: title.trim() ? 1 : 0.5,
+                    cursor: "pointer",
+                    backgroundColor: priority === value ? "#3b82f6" : "#f1f5f9",
+                    color: priority === value ? "#ffffff" : "#475569",
                     transition: "all 0.15s ease",
                   }}
                 >
-                  {ru ? "Далее →" : "Next →"}
+                  {emoji} {t(language, value)}
                 </button>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                type="button"
+                onClick={handleClose}
+                style={{
+                  flex: 1,
+                  height: "40px",
+                  borderRadius: "12px",
+                  border: "1.5px solid #e2e8f0",
+                  backgroundColor: "#ffffff",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "#64748b",
+                  cursor: "pointer",
+                }}
+              >
+                {ru ? "Отмена" : "Cancel"}
+              </button>
+              <button
+                type="button"
+                onClick={handleNext}
+                disabled={!title.trim()}
+                style={{
+                  flex: 1,
+                  height: "40px",
+                  borderRadius: "12px",
+                  border: "none",
+                  backgroundColor: title.trim() ? "#3b82f6" : "#cbd5e1",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "#ffffff",
+                  cursor: title.trim() ? "pointer" : "default",
+                  transition: "background-color 0.2s ease",
+                }}
+              >
+                {ru ? "Далее →" : "Next →"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ШАГ 2 */}
+        {step === 2 && (
+          <div>
+            <p
+              style={{
+                fontSize: "15px",
+                fontWeight: 700,
+                color: "#0f172a",
+                marginBottom: "12px",
+              }}
+            >
+              {ru ? "Когда напомнить?" : "When to remind?"}
+            </p>
+
+            <p
+              style={{
+                fontSize: "11px",
+                fontWeight: 500,
+                color: "#94a3b8",
+                marginBottom: "4px",
+              }}
+            >
+              {ru ? "Дата" : "Date"}
+            </p>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              style={{
+                display: "block",
+                width: "100%",
+                boxSizing: "border-box",
+                height: "42px",
+                borderRadius: "12px",
+                border: "1.5px solid #e2e8f0",
+                backgroundColor: "#f8fafc",
+                paddingLeft: "12px",
+                paddingRight: "12px",
+                fontSize: "14px",
+                color: "#1e293b",
+                outline: "none",
+                marginBottom: "10px",
+                appearance: "none",
+                WebkitAppearance: "none",
+              }}
+            />
+
+            <p
+              style={{
+                fontSize: "11px",
+                fontWeight: 500,
+                color: "#94a3b8",
+                marginBottom: "4px",
+              }}
+            >
+              {ru ? "Время" : "Time"}
+            </p>
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              style={{
+                display: "block",
+                width: "100%",
+                boxSizing: "border-box",
+                height: "42px",
+                borderRadius: "12px",
+                border: "1.5px solid #e2e8f0",
+                backgroundColor: "#f8fafc",
+                paddingLeft: "12px",
+                paddingRight: "12px",
+                fontSize: "14px",
+                color: "#1e293b",
+                outline: "none",
+                marginBottom: "10px",
+                appearance: "none",
+                WebkitAppearance: "none",
+              }}
+            />
+
+            {/* Повтор */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                backgroundColor: "#f8fafc",
+                borderRadius: "12px",
+                padding: "10px 12px",
+                marginBottom: "14px",
+                boxSizing: "border-box",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "#1e293b",
+                  margin: 0,
+                }}
+              >
+                🔁 {ru ? "Каждый день" : "Daily"}
+              </p>
+
+              <div
+                onClick={() => setRepeat(!repeat)}
+                style={{
+                  position: "relative",
+                  width: "44px",
+                  minWidth: "44px",
+                  height: "24px",
+                  borderRadius: "12px",
+                  backgroundColor: repeat ? "#3b82f6" : "#cbd5e1",
+                  cursor: "pointer",
+                  transition: "background-color 0.2s ease",
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "2px",
+                    left: repeat ? "22px" : "2px",
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "50%",
+                    backgroundColor: "#ffffff",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                    transition: "left 0.2s ease",
+                  }}
+                />
               </div>
             </div>
-          )}
 
-          {/* ============ ШАГ 2 ============ */}
-          {step === 2 && (
-            <div>
-              <p className="text-sm font-bold text-slate-900 mb-3">
-                {ru ? "Когда напомнить?" : "When to remind?"}
-              </p>
-
-              {/* Дата */}
-              <p
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                type="button"
+                onClick={handleBack}
                 style={{
-                  fontSize: "11px",
-                  fontWeight: 500,
-                  color: "#94a3b8",
-                  marginBottom: "4px",
-                }}
-              >
-                {ru ? "Дата" : "Date"}
-              </p>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  boxSizing: "border-box",
+                  width: "42px",
+                  minWidth: "42px",
                   height: "40px",
                   borderRadius: "12px",
-                  border: "1px solid #e2e8f0",
-                  backgroundColor: "#f8fafc",
-                  paddingLeft: "12px",
-                  paddingRight: "12px",
-                  fontSize: "14px",
-                  color: "#1e293b",
-                  outline: "none",
-                  marginBottom: "10px",
-                  WebkitAppearance: "none",
-                  MozAppearance: "none",
-                  appearance: "none",
-                }}
-              />
-
-              {/* Время */}
-              <p
-                style={{
-                  fontSize: "11px",
-                  fontWeight: 500,
-                  color: "#94a3b8",
-                  marginBottom: "4px",
-                }}
-              >
-                {ru ? "Время" : "Time"}
-              </p>
-              <input
-                type="time"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  boxSizing: "border-box",
-                  height: "40px",
-                  borderRadius: "12px",
-                  border: "1px solid #e2e8f0",
-                  backgroundColor: "#f8fafc",
-                  paddingLeft: "12px",
-                  paddingRight: "12px",
-                  fontSize: "14px",
-                  color: "#1e293b",
-                  outline: "none",
-                  marginBottom: "10px",
-                  WebkitAppearance: "none",
-                  MozAppearance: "none",
-                  appearance: "none",
-                }}
-              />
-
-              {/* Повтор */}
-              <div
-                style={{
+                  border: "1.5px solid #e2e8f0",
+                  backgroundColor: "#ffffff",
+                  fontSize: "16px",
+                  cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "space-between",
-                  backgroundColor: "#f8fafc",
-                  borderRadius: "12px",
-                  padding: "10px 12px",
-                  marginBottom: "14px",
+                  justifyContent: "center",
+                  color: "#64748b",
                 }}
               >
-                <div>
-                  <p style={{ fontSize: "13px", fontWeight: 500, color: "#1e293b" }}>
-                    🔁 {ru ? "Каждый день" : "Daily"}
-                  </p>
-                </div>
-                <div
-                  onClick={() => setRepeat(!repeat)}
-                  style={{
-                    position: "relative",
-                    width: "44px",
-                    height: "24px",
-                    minWidth: "44px",
-                    borderRadius: "12px",
-                    backgroundColor: repeat ? "#3b82f6" : "#cbd5e1",
-                    cursor: "pointer",
-                    transition: "background-color 0.2s ease",
-                    flexShrink: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: "2px",
-                      left: repeat ? "22px" : "2px",
-                      width: "20px",
-                      height: "20px",
-                      borderRadius: "50%",
-                      backgroundColor: "#ffffff",
-                      boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                      transition: "left 0.2s ease",
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Кнопки */}
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  type="button"
-                  onClick={handleBack}
-                  style={{
-                    width: "44px",
-                    minWidth: "44px",
-                    height: "40px",
-                    borderRadius: "12px",
-                    border: "1px solid #e2e8f0",
-                    backgroundColor: "#ffffff",
-                    fontSize: "16px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  ←
-                </button>
-                <button
-                  type="button"
-                  onClick={onSave}
-                  style={{
-                    flex: 1,
-                    height: "40px",
-                    borderRadius: "12px",
-                    border: "none",
-                    backgroundColor: "#3b82f6",
-                    fontSize: "13px",
-                    fontWeight: 500,
-                    color: "#ffffff",
-                    cursor: "pointer",
-                  }}
-                >
-                  {ru ? "Создать ✅" : "Create ✅"}
-                </button>
-              </div>
+                ←
+              </button>
+              <button
+                type="button"
+                onClick={onSave}
+                style={{
+                  flex: 1,
+                  height: "40px",
+                  borderRadius: "12px",
+                  border: "none",
+                  backgroundColor: "#3b82f6",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "#ffffff",
+                  cursor: "pointer",
+                }}
+              >
+                {ru ? "Создать ✅" : "Create ✅"}
+              </button>
             </div>
-          )}
-
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
