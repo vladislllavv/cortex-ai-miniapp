@@ -76,8 +76,8 @@ export default function AiProcessPage() {
     {
       role: "assistant",
       content: ru
-        ? "Привет! 👋 Я твой AI ассистент.\n\nЯ вижу твои задачи и могу помочь:\n• Оптимизировать их выполнение 🎯\n• Разбить сложные задачи на шаги 📋\n• Дать советы для снижения стресса 🧘\n\nСпроси меня что-нибудь!"
-        : "Hi! 👋 I'm your AI assistant.\n\nI can see your tasks and help:\n• Optimize execution 🎯\n• Break tasks into steps 📋\n• Reduce stress 🧘\n\nAsk me anything!",
+        ? "Привет! 👋 Я твой AI ассистент.\n\nЯ вижу твои задачи и могу помочь:\n• Оптимизировать выполнение 🎯\n• Разбить на шаги 📋\n• Снизить стресс 🧘\n\nСпроси что-нибудь!"
+        : "Hi! 👋 I'm your AI assistant.\n\nI can help:\n• Optimize tasks 🎯\n• Break into steps 📋\n• Reduce stress 🧘\n\nAsk me anything!",
     },
   ]);
 
@@ -90,18 +90,8 @@ export default function AiProcessPage() {
   }, [messages]);
 
   const quickQuestions = ru
-    ? [
-        "Как оптимизировать мои задачи?",
-        "С чего начать сегодня?",
-        "Как снизить стресс?",
-        "Разбей задачи на шаги",
-      ]
-    : [
-        "How to optimize my tasks?",
-        "What to start with today?",
-        "How to reduce stress?",
-        "Break tasks into steps",
-      ];
+    ? ["Оптимизируй задачи", "С чего начать?", "Снизить стресс", "Разбей на шаги"]
+    : ["Optimize tasks", "What to start?", "Reduce stress", "Break into steps"];
 
   const sendMessage = async (text?: string) => {
     const messageText = (text || input).trim();
@@ -115,23 +105,16 @@ export default function AiProcessPage() {
     setLoading(true);
 
     try {
-      const reply = await askGroq(
-        updatedMessages.slice(1),
-        tasksSummary
-      );
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: reply },
-      ]);
+      const reply = await askGroq(updatedMessages.slice(1), tasksSummary);
+      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
     } catch (err: any) {
-      console.error("AI error:", err);
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
           content: ru
-            ? `⚠️ Ошибка подключения к AI.\n\n${err?.message || ""}\n\nПроверь интернет и попробуй ещё раз.`
-            : `⚠️ AI connection error.\n\n${err?.message || ""}\n\nCheck internet and try again.`,
+            ? `⚠️ Ошибка: ${err?.message || "Попробуй позже"}`
+            : `⚠️ Error: ${err?.message || "Try again later"}`,
         },
       ]);
     } finally {
@@ -144,8 +127,8 @@ export default function AiProcessPage() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 80px)",
-        paddingTop: "8px",
+        height: "calc(100vh - 160px)",
+        minHeight: "300px",
       }}
     >
       {/* Заголовок */}
@@ -154,7 +137,8 @@ export default function AiProcessPage() {
           display: "flex",
           alignItems: "center",
           gap: "12px",
-          marginBottom: "16px",
+          marginBottom: "12px",
+          flexShrink: 0,
         }}
       >
         <div
@@ -173,26 +157,11 @@ export default function AiProcessPage() {
           <Bot size={22} color="#3b82f6" />
         </div>
         <div>
-          <p
-            style={{
-              fontSize: "17px",
-              fontWeight: 700,
-              color: "white",
-              margin: 0,
-            }}
-          >
+          <p style={{ fontSize: "17px", fontWeight: 700, color: "white", margin: 0 }}>
             AI {ru ? "Ассистент" : "Assistant"}
           </p>
-          <p
-            style={{
-              fontSize: "12px",
-              color: "rgba(255,255,255,0.4)",
-              margin: 0,
-            }}
-          >
-            {ru
-              ? `${activeTasks.length} активных задач`
-              : `${activeTasks.length} active tasks`}
+          <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+            {ru ? `${activeTasks.length} активных задач` : `${activeTasks.length} active tasks`}
           </p>
         </div>
       </div>
@@ -202,10 +171,11 @@ export default function AiProcessPage() {
         <div
           style={{
             display: "flex",
-            gap: "8px",
+            gap: "6px",
             overflowX: "auto",
-            marginBottom: "14px",
+            marginBottom: "10px",
             paddingBottom: "4px",
+            flexShrink: 0,
           }}
         >
           {quickQuestions.map((q) => (
@@ -216,13 +186,12 @@ export default function AiProcessPage() {
                 whiteSpace: "nowrap",
                 backgroundColor: "rgba(59,130,246,0.12)",
                 border: "1px solid rgba(59,130,246,0.25)",
-                borderRadius: "20px",
-                padding: "7px 14px",
+                borderRadius: "18px",
+                padding: "6px 12px",
                 fontSize: "12px",
                 color: "#93c5fd",
                 cursor: "pointer",
                 flexShrink: 0,
-                transition: "all 0.15s ease",
               }}
             >
               {q}
@@ -238,13 +207,14 @@ export default function AiProcessPage() {
           overflowY: "auto",
           display: "flex",
           flexDirection: "column",
-          gap: "10px",
-          paddingBottom: "12px",
+          gap: "8px",
+          paddingBottom: "8px",
+          minHeight: 0,
         }}
       >
-        {messages.map((msg, index) => (
+        {messages.map((msg, i) => (
           <div
-            key={index}
+            key={i}
             style={{
               display: "flex",
               justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
@@ -253,30 +223,18 @@ export default function AiProcessPage() {
             <div
               style={{
                 maxWidth: "85%",
-                padding: "11px 15px",
-                borderRadius:
-                  msg.role === "user"
-                    ? "18px 18px 4px 18px"
-                    : "18px 18px 18px 4px",
-                backgroundColor:
-                  msg.role === "user"
-                    ? "#3b82f6"
-                    : "rgba(255,255,255,0.07)",
-                border:
-                  msg.role === "assistant"
-                    ? "1px solid rgba(255,255,255,0.08)"
-                    : "none",
+                padding: "10px 14px",
+                borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                backgroundColor: msg.role === "user" ? "#3b82f6" : "rgba(255,255,255,0.07)",
+                border: msg.role === "assistant" ? "1px solid rgba(255,255,255,0.08)" : "none",
               }}
             >
               <p
                 style={{
                   fontSize: "14px",
-                  color:
-                    msg.role === "user"
-                      ? "white"
-                      : "rgba(255,255,255,0.9)",
+                  color: msg.role === "user" ? "white" : "rgba(255,255,255,0.9)",
                   margin: 0,
-                  lineHeight: "1.55",
+                  lineHeight: "1.5",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                 }}
@@ -291,8 +249,8 @@ export default function AiProcessPage() {
           <div style={{ display: "flex", justifyContent: "flex-start" }}>
             <div
               style={{
-                padding: "12px 16px",
-                borderRadius: "18px 18px 18px 4px",
+                padding: "10px 14px",
+                borderRadius: "16px 16px 16px 4px",
                 backgroundColor: "rgba(255,255,255,0.07)",
                 border: "1px solid rgba(255,255,255,0.08)",
                 display: "flex",
@@ -301,16 +259,11 @@ export default function AiProcessPage() {
               }}
             >
               <Loader2
-                size={16}
+                size={14}
                 color="rgba(255,255,255,0.5)"
                 style={{ animation: "spin 1s linear infinite" }}
               />
-              <span
-                style={{
-                  fontSize: "13px",
-                  color: "rgba(255,255,255,0.5)",
-                }}
-              >
+              <span style={{ fontSize: "13px", color: "rgba(255,255,255,0.5)" }}>
                 {ru ? "Думаю..." : "Thinking..."}
               </span>
             </div>
@@ -320,14 +273,15 @@ export default function AiProcessPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Поле ввода */}
+      {/* Поле ввода — всегда видно */}
       <div
         style={{
           display: "flex",
           gap: "8px",
           alignItems: "flex-end",
-          paddingTop: "10px",
+          paddingTop: "8px",
           borderTop: "1px solid rgba(255,255,255,0.07)",
+          flexShrink: 0,
         }}
       >
         <textarea
@@ -339,19 +293,19 @@ export default function AiProcessPage() {
               sendMessage();
             }
           }}
-          placeholder={ru ? "Спроси что-нибудь..." : "Ask something..."}
+          placeholder={ru ? "Спроси..." : "Ask..."}
           rows={1}
           style={{
             flex: 1,
             backgroundColor: "rgba(255,255,255,0.07)",
             border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: "16px",
-            padding: "11px 14px",
+            borderRadius: "14px",
+            padding: "10px 12px",
             fontSize: "14px",
             color: "white",
             outline: "none",
             resize: "none",
-            maxHeight: "100px",
+            maxHeight: "80px",
             overflowY: "auto",
             boxSizing: "border-box",
             fontFamily: "inherit",
@@ -362,24 +316,20 @@ export default function AiProcessPage() {
           onClick={() => sendMessage()}
           disabled={!input.trim() || loading}
           style={{
-            width: "44px",
-            height: "44px",
-            minWidth: "44px",
+            width: "42px",
+            height: "42px",
+            minWidth: "42px",
             borderRadius: "50%",
-            backgroundColor:
-              input.trim() && !loading
-                ? "#3b82f6"
-                : "rgba(255,255,255,0.08)",
+            backgroundColor: input.trim() && !loading ? "#3b82f6" : "rgba(255,255,255,0.08)",
             border: "none",
             cursor: input.trim() && !loading ? "pointer" : "default",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            transition: "background-color 0.2s ease",
             flexShrink: 0,
           }}
         >
-          <Send size={18} color="white" />
+          <Send size={16} color="white" />
         </button>
       </div>
 
@@ -388,9 +338,7 @@ export default function AiProcessPage() {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        textarea::placeholder {
-          color: rgba(255,255,255,0.3);
-        }
+        textarea::placeholder { color: rgba(255,255,255,0.3); }
       `}</style>
     </div>
   );
