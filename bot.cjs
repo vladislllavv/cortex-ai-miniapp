@@ -8,9 +8,10 @@ const {
   getDocs,
   updateDoc,
   setDoc,
-  addDoc,
+  getDoc,
   doc,
-  Timestamp
+  Timestamp,
+  addDoc,
 } = require('firebase/firestore');
 
 const firebaseConfig = {
@@ -24,16 +25,15 @@ const firebaseConfig = {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
-
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Список администраторов
 const ADMINS = ["56733076"];
 
 bot.setMyCommands([
   { command: "start", description: "Запустить бота" },
-  { command: "subscribe", description: "Купить подписку" }
+  { command: "subscribe", description: "Купить подписку" },
+  { command: "myid", description: "Узнать свой ID" },
 ]);
 
 console.log("Бот запущен ✅");
@@ -45,13 +45,12 @@ function isAdmin(userId) {
 async function grantSubscription(userId, days = 30, isGift = false) {
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + days);
-
   await setDoc(doc(db, "subscriptions", String(userId)), {
     userId: String(userId),
     isActive: true,
     expiresAt: Timestamp.fromDate(expiresAt),
     updatedAt: Timestamp.fromDate(new Date()),
-    isGift: isGift
+    isGift,
   });
 }
 
@@ -59,19 +58,18 @@ async function grantSubscription(userId, days = 30, isGift = false) {
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   const userId = String(chatId);
-
   if (isAdmin(userId)) {
-    try {
-      await grantSubscription(userId, 3650, true);
-    } catch (err) {
-      console.log("Ошибка авто-выдачи подписки админу:", err.message);
-    }
+    try { await grantSubscription(userId, 3650, true); } catch {}
   }
-
-  bot.sendMessage(
-    chatId,
-    "Привет! Я буду напоминать тебе о задачах 🔔\n\nКоманды:\n/start — запуск\n/subscribe — купить подписку\n/myid — узнать свой ID"
+  bot.sendMessage(chatId,
+    "Привет! Я буду напоминать тебе о задачах 🔔\n\n" +
+    "Команды:\n/start — запуск\n/subscribe — купить подписку\n/myid — узнать свой ID"
   );
+});
+
+// /myid
+bot.onText(/\/myid/, (msg) => {
+  bot.sendMessage(msg.chat.id, `Твой Telegram ID: \`${msg.chat.id}\``, { parse_mode: "Markdown" });
 });
 
 // /appss_verify
@@ -79,34 +77,17 @@ bot.onText(/\/appss_verify/, (msg) => {
   bot.sendMessage(msg.chat.id, "appss_73be81");
 });
 
-// /myid
-bot.onText(/\/myid/, (msg) => {
-  bot.sendMessage(msg.chat.id, `Твой Telegram ID: ${msg.chat.id}`);
-});
-
 // /gift
 bot.onText(/\/gift (.+)/, async (msg, match) => {
-  const senderId = String(msg.chat.id);
-
-  if (!isAdmin(senderId)) {
-    bot.sendMessage(msg.chat.id, "❌ У тебя нет прав для этой команды.");
+  if (!isAdmin(String(msg.chat.id))) {
+    bot.sendMessage(msg.chat.id, "❌ Нет прав.");
     return;
   }
-
-  const targetUserId = match[1].trim();
-
+  const targetId = match[1].trim();
   try {
-    await grantSubscription(targetUserId, 3650, true);
-    await bot.sendMessage(msg.chat.id, `✅ Подписка выдана пользователю ${targetUserId}`);
-
-    try {
-      await bot.sendMessage(
-        targetUserId,
-        "🎁 Тебе выдана бесплатная подписка CortexAI!\n\n✅ Безлимитные задачи\n✅ AI агент"
-      );
-    } catch (err) {
-      console.log("Не удалось отправить сообщение пользователю:", err.message);
-    }
+    await grantSubscription(targetId, 3650, true);
+    bot.sendMessage(msg.chat.id, `✅ Подписка выдана пользователю ${targetId}`);
+    try { bot.sendMessage(targetId, "🎁 Тебе выдана бесплатная подписка CortexAI!\n\n✅ Безлимитные задачи\n✅ AI ассистент"); } catch {}
   } catch (err) {
     bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
   }
@@ -114,23 +95,17 @@ bot.onText(/\/gift (.+)/, async (msg, match) => {
 
 // /revoke
 bot.onText(/\/revoke (.+)/, async (msg, match) => {
-  const senderId = String(msg.chat.id);
-
-  if (!isAdmin(senderId)) {
-    bot.sendMessage(msg.chat.id, "❌ У тебя нет прав для этой команды.");
+  if (!isAdmin(String(msg.chat.id))) {
+    bot.sendMessage(msg.chat.id, "❌ Нет прав.");
     return;
   }
-
-  const targetUserId = match[1].trim();
-
+  const targetId = match[1].trim();
   try {
-    await setDoc(doc(db, "subscriptions", String(targetUserId)), {
-      userId: String(targetUserId),
-      isActive: false,
-      updatedAt: Timestamp.fromDate(new Date())
+    await setDoc(doc(db, "subscriptions", String(targetId)), {
+      userId: String(targetId), isActive: false,
+      updatedAt: Timestamp.fromDate(new Date()),
     });
-
-    bot.sendMessage(msg.chat.id, `✅ Подписка отключена у пользователя ${targetUserId}`);
+    bot.sendMessage(msg.chat.id, `✅ Подписка отключена у ${targetId}`);
   } catch (err) {
     bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
   }
@@ -139,58 +114,43 @@ bot.onText(/\/revoke (.+)/, async (msg, match) => {
 // /subscribe
 bot.onText(/\/subscribe/, async (msg) => {
   const chatId = msg.chat.id;
-  const userId = String(chatId);
-
-  if (isAdmin(userId)) {
-    bot.sendMessage(chatId, "👑 Ты администратор — подписка для тебя бесплатна.");
+  if (isAdmin(String(chatId))) {
+    bot.sendMessage(chatId, "👑 Ты администратор — подписка бесплатна.");
     return;
   }
-
   try {
-    await bot.sendInvoice(
-      chatId,
-      "Подписка CortexAI 🚀",
-      "Безлимитные задачи + AI агент на 30 дней",
-      `sub_${chatId}`,
-      "",
-      "XTR",
+    await bot.sendInvoice(chatId, "Подписка CortexAI 🚀",
+      "Безлимитные задачи + AI ассистент на 30 дней",
+      `sub_${chatId}`, "", "XTR",
       [{ label: "Подписка на 30 дней", amount: 100 }]
     );
   } catch (err) {
-    console.log("Ошибка отправки инвойса:", err.message);
     bot.sendMessage(chatId, "Ошибка при создании счёта. Попробуй позже.");
   }
 });
 
-// Подтверждение оплаты
 bot.on("pre_checkout_query", (query) => {
   bot.answerPreCheckoutQuery(query.id, true);
 });
 
-// Успешная оплата
 bot.on("successful_payment", async (msg) => {
   const userId = String(msg.chat.id);
-
   try {
     await grantSubscription(userId, 30, false);
-    console.log(`Подписка активирована для ${userId}`);
-
-    bot.sendMessage(
-      msg.chat.id,
-      "✅ Подписка активирована!\n\n🚀 Теперь тебе доступны:\n• Безлимитные задачи\n• AI агент\n\nПодписка действует 30 дней."
+    bot.sendMessage(msg.chat.id,
+      "✅ Подписка активирована!\n\n🚀 Доступны:\n• Безлимитные задачи\n• AI ассистент\n\nПодписка действует 30 дней."
     );
   } catch (err) {
     console.log("Ошибка активации подписки:", err.message);
   }
 });
 
-// Создать повторяющуюся задачу на следующий день
+// Создать повторяющуюся задачу
 async function createNextDailyTask(task) {
   try {
-    const oldDate = new Date(task.reminderAt.toDate());
+    const oldDate = task.reminderAt.toDate();
     const nextDate = new Date(oldDate);
     nextDate.setDate(nextDate.getDate() + 1);
-
     await addDoc(collection(db, "tasks"), {
       userId: task.userId,
       taskId: `daily_${Date.now()}`,
@@ -202,51 +162,33 @@ async function createNextDailyTask(task) {
       createdAt: new Date().toISOString(),
       isSent: false,
       reminderAt: Timestamp.fromDate(nextDate),
-      repeat: "daily"
+      repeat: "daily",
     });
-
-    console.log(`Создана повторяющаяся задача для ${task.userId}: ${task.title}`);
   } catch (err) {
-    console.log(`Ошибка создания повторяющейся задачи: ${err.message}`);
+    console.log("Ошибка создания повторяющейся задачи:", err.message);
   }
 }
 
-// Проверка напоминаний каждую минуту
+// Проверка напоминаний
 async function checkReminders() {
   try {
     const now = new Date();
-    const tasksRef = collection(db, "tasks");
-
     const q = query(
-      tasksRef,
+      collection(db, "tasks"),
       where("isSent", "==", false),
       where("reminderAt", "<=", Timestamp.fromDate(now))
     );
-
     const snapshot = await getDocs(q);
 
     for (const documentSnapshot of snapshot.docs) {
       const task = documentSnapshot.data();
-
       try {
-        // Отправляем уведомление
         await bot.sendMessage(
           task.userId,
           `🔔 Напоминание!\n\n📌 ${task.title}${task.description ? `\n${task.description}` : ""}${task.repeat === "daily" ? "\n\n🔁 Ежедневная задача" : ""}`
         );
-
-        // Отмечаем как отправленное
-        await updateDoc(doc(db, "tasks", documentSnapshot.id), {
-          isSent: true
-        });
-
-        console.log(`Уведомление отправлено пользователю ${task.userId}`);
-
-        // Если задача ежедневная — создаём новую на завтра
-        if (task.repeat === "daily") {
-          await createNextDailyTask(task);
-        }
-
+        await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
+        if (task.repeat === "daily") await createNextDailyTask(task);
       } catch (err) {
         console.log(`Ошибка отправки: ${err.message}`);
       }
@@ -256,4 +198,93 @@ async function checkReminders() {
   }
 }
 
-setInterval(checkReminders, 60000);
+// Проверка подписки (за 3 дня до окончания)
+async function checkSubscriptions() {
+  try {
+    const now = new Date();
+    const in3days = new Date(now);
+    in3days.setDate(in3days.getDate() + 3);
+
+    const subsSnap = await getDocs(collection(db, "subscriptions"));
+
+    for (const subDoc of subsSnap.docs) {
+      const sub = subDoc.data();
+      if (!sub.isActive || !sub.expiresAt) continue;
+
+      const expiresAt = sub.expiresAt.toDate();
+      const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
+
+      if (daysLeft === 3 && !sub.notified3days) {
+        try {
+          await bot.sendMessage(
+            sub.userId,
+            `⚠️ Твоя подписка CortexAI заканчивается через 3 дня!\n\n📅 Дата окончания: ${expiresAt.toLocaleDateString("ru-RU")}\n\nНапиши /subscribe для продления 🚀`
+          );
+          await updateDoc(doc(db, "subscriptions", subDoc.id), { notified3days: true });
+        } catch {}
+      }
+
+      if (daysLeft === 1 && !sub.notified1day) {
+        try {
+          await bot.sendMessage(
+            sub.userId,
+            `🚨 Подписка CortexAI заканчивается ЗАВТРА!\n\nНапиши /subscribe для продления ⚡`
+          );
+          await updateDoc(doc(db, "subscriptions", subDoc.id), { notified1day: true });
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.log("Ошибка проверки подписок:", err.message);
+  }
+}
+
+// Проверка дней рождения
+async function checkBirthdays() {
+  try {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const tomorrowMonth = String(tomorrow.getMonth() + 1).padStart(2, "0");
+    const tomorrowDay = String(tomorrow.getDate()).padStart(2, "0");
+    const tomorrowStr = `${tomorrowMonth}-${tomorrowDay}`;
+
+    const todayMonth = String(now.getMonth() + 1).padStart(2, "0");
+    const todayDay = String(now.getDate()).padStart(2, "0");
+    const todayStr = `${todayMonth}-${todayDay}`;
+
+    // Получаем всех пользователей
+    const usersSnap = await getDocs(collection(db, "users"));
+
+    for (const userDoc of usersSnap.docs) {
+      const userId = userDoc.id;
+      const birthdaysSnap = await getDocs(collection(db, "users", userId, "birthdays"));
+
+      for (const bdDoc of birthdaysSnap.docs) {
+        const bd = bdDoc.data();
+
+        // За день до ДР
+        if (bd.date === tomorrowStr) {
+          try {
+            await bot.sendMessage(userId, `🎂 Завтра день рождения у ${bd.name}!\n\nНе забудь поздравить! 🎉`);
+          } catch {}
+        }
+
+        // В день ДР
+        if (bd.date === todayStr) {
+          try {
+            await bot.sendMessage(userId, `🎉 Сегодня день рождения у ${bd.name}!\n\nПоздравь прямо сейчас! 🎂🥳`);
+          } catch {}
+        }
+      }
+    }
+  } catch (err) {
+    console.log("Ошибка проверки дней рождения:", err.message);
+  }
+}
+
+// Запуск проверок
+setInterval(checkReminders, 60 * 1000);           // каждую минуту
+setInterval(checkSubscriptions, 60 * 60 * 1000);   // каждый час
+setInterval(checkBirthdays, 60 * 60 * 1000);       // каждый час
