@@ -24,78 +24,140 @@ interface Message {
   content: string;
 }
 
-// ============ ПАРСИНГ ВРЕМЕНИ ============
+// ============ БЛОК 3 — УЛУЧШЕННЫЙ ПАРСИНГ ВРЕМЕНИ ============
 
 function parseTimeFromText(inputText: string): Date | null {
   const now = new Date();
-  const lower = inputText.toLowerCase();
+  const lower = inputText.toLowerCase().trim();
 
-  const minMatch = lower.match(/через\s+(\d+)\s*мин/);
+  // через X минут/мин
+  const minMatch = lower.match(/через\s+(\d+)\s*(минут|мин|m)/);
   if (minMatch) {
     const d = new Date(now);
     d.setMinutes(d.getMinutes() + parseInt(minMatch[1]));
     return d;
   }
 
-  const hourMatch = lower.match(/через\s+(\d+)\s*час/);
+  // через X часов/час/ч
+  const hourMatch = lower.match(/через\s+(\d+)\s*(часов|часа|час|ч|h)/);
   if (hourMatch) {
     const d = new Date(now);
     d.setHours(d.getHours() + parseInt(hourMatch[1]));
     return d;
   }
 
-  if (lower.includes("в час") || lower.includes("в один час")) {
+  // через X дней
+  const dayMatch = lower.match(/через\s+(\d+)\s*(дней|дня|день)/);
+  if (dayMatch) {
     const d = new Date(now);
-    d.setHours(13, 0, 0);
-    if (d < now) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + parseInt(dayMatch[1]));
+    d.setHours(9, 0, 0);
     return d;
   }
 
+  // "в час" = 13:00
+  if (/в\s+час\b/.test(lower)) {
+    const d = new Date(now);
+    d.setHours(13, 0, 0, 0);
+    if (d <= now) d.setDate(d.getDate() + 1);
+    return d;
+  }
+
+  // Словесные часы
   const wordHours: Record<string, number> = {
-    "два": 14, "три": 15, "четыре": 16, "пять": 17,
-    "шесть": 18, "семь": 19, "восемь": 20, "девять": 21,
-    "десять": 22, "одиннадцать": 23, "двенадцать": 12,
+    "полночь": 0, "полдень": 12,
+    "два": 14, "двух": 14, "двенадцать": 12,
+    "три": 15, "трёх": 15, "четыре": 16, "четырёх": 16,
+    "пять": 17, "пяти": 17, "шесть": 18, "шести": 18,
+    "семь": 19, "семи": 19, "восемь": 20, "восьми": 20,
+    "девять": 21, "девяти": 21, "десять": 22, "десяти": 22,
+    "одиннадцать": 23, "одиннадцати": 23,
   };
+
   for (const [word, hour] of Object.entries(wordHours)) {
-    if (lower.includes(`в ${word}`)) {
+    if (new RegExp(`в\\s+${word}\\b`).test(lower)) {
       const d = new Date(now);
-      d.setHours(hour, 0, 0);
-      if (d < now) d.setDate(d.getDate() + 1);
+      d.setHours(hour, 0, 0, 0);
+      if (d <= now) d.setDate(d.getDate() + 1);
       return d;
     }
   }
 
-  const timeMatch = lower.match(/в\s+(\d{1,2})[:\s]?(\d{2})?/);
+  // Числовое время: "в 14:30", "в 14", "в 9:00"
+  const timeMatch = lower.match(/в\s+(\d{1,2})(?::(\d{2}))?(?:\s|$)/);
   if (timeMatch) {
-    const d = new Date(now);
-    d.setHours(parseInt(timeMatch[1]));
-    d.setMinutes(timeMatch[2] ? parseInt(timeMatch[2]) : 0);
-    d.setSeconds(0);
-    if (d < now) d.setDate(d.getDate() + 1);
-    return d;
+    const hour = parseInt(timeMatch[1]);
+    const minute = timeMatch[2] ? parseInt(timeMatch[2]) : 0;
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      const d = new Date(now);
+      d.setHours(hour, minute, 0, 0);
+      if (d <= now) d.setDate(d.getDate() + 1);
+      return d;
+    }
   }
 
+  // "завтра [в X]"
   if (lower.includes("завтра")) {
     const d = new Date(now);
     d.setDate(d.getDate() + 1);
-    const m = lower.match(/завтра.*в\s+(\d{1,2})[:\s]?(\d{2})?/);
-    if (m) { d.setHours(parseInt(m[1])); d.setMinutes(m[2] ? parseInt(m[2]) : 0); }
-    else d.setHours(9, 0, 0);
+    const m = lower.match(/в\s+(\d{1,2})(?::(\d{2}))?/);
+    if (m) {
+      d.setHours(parseInt(m[1]), m[2] ? parseInt(m[2]) : 0, 0, 0);
+    } else {
+      d.setHours(9, 0, 0, 0);
+    }
     return d;
   }
 
-  if (lower.includes("сегодня")) {
-    const d = new Date(now);
-    const m = lower.match(/сегодня.*в\s+(\d{1,2})[:\s]?(\d{2})?/);
-    if (m) { d.setHours(parseInt(m[1])); d.setMinutes(m[2] ? parseInt(m[2]) : 0); d.setSeconds(0); }
-    else d.setHours(18, 0, 0);
-    return d;
-  }
-
+  // "послезавтра [в X]"
   if (lower.includes("послезавтра")) {
     const d = new Date(now);
     d.setDate(d.getDate() + 2);
-    d.setHours(9, 0, 0);
+    const m = lower.match(/в\s+(\d{1,2})(?::(\d{2}))?/);
+    if (m) {
+      d.setHours(parseInt(m[1]), m[2] ? parseInt(m[2]) : 0, 0, 0);
+    } else {
+      d.setHours(9, 0, 0, 0);
+    }
+    return d;
+  }
+
+  // "сегодня [в X]"
+  if (lower.includes("сегодня")) {
+    const d = new Date(now);
+    const m = lower.match(/в\s+(\d{1,2})(?::(\d{2}))?/);
+    if (m) {
+      d.setHours(parseInt(m[1]), m[2] ? parseInt(m[2]) : 0, 0, 0);
+      if (d <= now) d.setDate(d.getDate() + 1);
+    } else {
+      d.setHours(18, 0, 0, 0);
+    }
+    return d;
+  }
+
+  // Время суток
+  if (lower.includes("утром")) {
+    const d = new Date(now);
+    d.setHours(9, 0, 0, 0);
+    if (d <= now) d.setDate(d.getDate() + 1);
+    return d;
+  }
+  if (lower.includes("вечером")) {
+    const d = new Date(now);
+    d.setHours(19, 0, 0, 0);
+    if (d <= now) d.setDate(d.getDate() + 1);
+    return d;
+  }
+  if (lower.includes("ночью") || lower.includes("ночь")) {
+    const d = new Date(now);
+    d.setHours(23, 0, 0, 0);
+    if (d <= now) d.setDate(d.getDate() + 1);
+    return d;
+  }
+  if (lower.includes("днём") || lower.includes("днем")) {
+    const d = new Date(now);
+    d.setHours(13, 0, 0, 0);
+    if (d <= now) d.setDate(d.getDate() + 1);
     return d;
   }
 
@@ -130,34 +192,28 @@ function extractTaskTitle(inputText: string): string {
     if (lower.startsWith(prefix)) { title = title.slice(prefix.length).trim(); break; }
   }
   title = title
-    .replace(/через\s+\d+\s*(минут|час|день|мин|ч)/gi, "")
-    .replace(/в\s+\d{1,2}[:\s]\d{2}/gi, "")
-    .replace(/в\s+\d{1,2}/gi, "")
-    .replace(/завтра|сегодня|послезавтра|утром|вечером|ночью/gi, "")
+    .replace(/через\s+\d+\s*(минут|час|день|мин|ч|дней|дня)/gi, "")
+    .replace(/в\s+\d{1,2}:\d{2}/gi, "")
+    .replace(/в\s+\d{1,2}(?=\s|$)/gi, "")
+    .replace(/завтра|сегодня|послезавтра|утром|вечером|ночью|днём|днем/gi, "")
     .replace(/срочно|важно|критично/gi, "")
     .trim();
   return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
-// Проверяем — это ответ на вопрос "за сколько напомнить?"
 function parseReminderAdvance(inputText: string): number | null {
   const lower = inputText.toLowerCase();
-
   if (lower.includes("без напомин") || lower.includes("no reminder") || lower.includes("не надо")) return 0;
-
   const minMatch = lower.match(/за\s+(\d+)\s*мин/);
   if (minMatch) return parseInt(minMatch[1]);
-
   const hourMatch = lower.match(/за\s+(\d+)\s*час/);
   if (hourMatch) return parseInt(hourMatch[1]) * 60;
-
   if (lower.includes("за день") || lower.includes("за сутки")) return 24 * 60;
   if (lower.includes("за час")) return 60;
   if (lower.includes("за полчаса") || lower.includes("за 30")) return 30;
   if (lower.includes("за 15")) return 15;
   if (lower.includes("за 10")) return 10;
   if (lower.includes("за 5")) return 5;
-
   return null;
 }
 
@@ -190,16 +246,13 @@ function generateAIResponse(
     if (advance !== null) {
       return {
         responseText: ru
-          ? `✅ Готово! Задача создана и напоминание установлено.\n\n📌 ${pendingTask.title}${advance > 0 ? `\n⏰ Напомню за ${advance} мин до события` : ""}`
-          : `✅ Done! Task created with reminder.\n\n📌 ${pendingTask.title}${advance > 0 ? `\n⏰ Will remind ${advance} min before` : ""}`,
+          ? `✅ Готово! Задача создана.\n\n📌 ${pendingTask.title}${advance > 0 ? `\n⏰ Напомню за ${advance} мин до события` : ""}`
+          : `✅ Done! Task created.\n\n📌 ${pendingTask.title}${advance > 0 ? `\n⏰ Will remind ${advance} min before` : ""}`,
         task: { title: pendingTask.title, dueDate: pendingTask.dueDate, priority: "medium" },
       };
     }
-    // Не понял ответ — всё равно создаём задачу
     return {
-      responseText: ru
-        ? `✅ Задача создана!\n\n📌 ${pendingTask.title}`
-        : `✅ Task created!\n\n📌 ${pendingTask.title}`,
+      responseText: ru ? `✅ Задача создана!\n\n📌 ${pendingTask.title}` : `✅ Task created!\n\n📌 ${pendingTask.title}`,
       task: { title: pendingTask.title, dueDate: pendingTask.dueDate, priority: "medium" },
     };
   }
@@ -213,17 +266,15 @@ function generateAIResponse(
       });
       return {
         responseText: ru
-          ? `✅ ${assistantName} поставила напоминание.\n\n📌 ${pendingTask.title}\n⏰ ${timeStr}\n\nЗа сколько напомнить заранее? (за 15 мин, за час, без напоминания)`
-          : `✅ ${assistantName} set a reminder.\n\n📌 ${pendingTask.title}\n⏰ ${timeStr}\n\nHow early to remind? (15 min before, 1 hour, no reminder)`,
-        task: null,
-        needsAdvance: true,
-        pendingTitle: pendingTask.title,
+          ? `✅ ${assistantName} поставила напоминание.\n\n📌 ${pendingTask.title}\n⏰ ${timeStr}\n\nЗа сколько напомнить заранее?\n(за 15 мин / за час / без напоминания)`
+          : `✅ ${assistantName} set reminder.\n\n📌 ${pendingTask.title}\n⏰ ${timeStr}\n\nHow early to remind?\n(15 min / 1 hour / no reminder)`,
+        task: null, needsAdvance: true, pendingTitle: pendingTask.title,
       };
     }
     return {
       responseText: ru
-        ? `Не понял время 🤔 Уточни: "в 15:00", "через 30 минут", "завтра в 9"`
-        : `Couldn't parse time 🤔 Try: "at 15:00", "in 30 minutes", "tomorrow at 9"`,
+        ? `Не понял время 🤔\n\nУточни например:\n"завтра в 10:00"\n"через 2 часа"\n"сегодня вечером"`
+        : `Couldn't parse time 🤔\n\nTry:\n"tomorrow at 10:00"\n"in 2 hours"\n"this evening"`,
       task: null, needsTime: true, pendingTitle: pendingTask.title,
     };
   }
@@ -250,15 +301,12 @@ function generateAIResponse(
     if (todayBirthdays.length > 0) {
       response += `🎂 ${ru ? "День рождения" : "Birthday"}: ${todayBirthdays.map((b: any) => b.name).join(", ")}\n\n`;
     }
-
     if (todayTasks.length === 0) {
       response += ru ? "✅ Задач на сегодня нет!" : "✅ No tasks today!";
     } else {
       response += ru ? `📋 Задачи (${todayTasks.length}):\n` : `📋 Tasks (${todayTasks.length}):\n`;
       todayTasks.forEach((t, i) => {
-        const time = t.dueDate
-          ? new Date(t.dueDate).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
-          : "";
+        const time = t.dueDate ? new Date(t.dueDate).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "";
         response += `${i + 1}. ${t.status === "done" ? "✅" : "⬜"} ${t.title}${time ? ` — ${time}` : ""}\n`;
       });
     }
@@ -278,18 +326,14 @@ function generateAIResponse(
         });
         return {
           responseText: ru
-            ? `✅ Хорошо, ${assistantName} поставила напоминание.\n\n📌 ${title}\n⏰ ${timeStr}\n\nЗа сколько напомнить заранее? (за 15 мин, за час, без напоминания)`
-            : `✅ Done, ${assistantName} set reminder.\n\n📌 ${title}\n⏰ ${timeStr}\n\nHow early to remind? (15 min, 1 hour, no reminder)`,
-          task: null,
-          needsAdvance: true,
-          pendingTitle: title,
+            ? `✅ Хорошо, ${assistantName} поставила напоминание.\n\n📌 ${title}\n⏰ ${timeStr}\n\nЗа сколько напомнить заранее?\n(за 15 мин / за час / без напоминания)`
+            : `✅ Done, ${assistantName} set reminder.\n\n📌 ${title}\n⏰ ${timeStr}\n\nHow early to remind?\n(15 min / 1 hour / no reminder)`,
+          task: null, needsAdvance: true, pendingTitle: title,
         };
       }
-
-      // Нет времени — обязательно запрашиваем
       return {
         responseText: ru
-          ? `📌 Понял: "${title}"\n\n⚠️ Задачи создаются только с указанием даты и времени.\n\nКогда напомнить?\n"завтра в 10:00" или "через 2 часа"`
+          ? `📌 Понял: "${title}"\n\n⚠️ Задачи создаются только с датой и временем.\n\nКогда напомнить?\n"завтра в 10:00" или "через 2 часа"`
           : `📌 Got it: "${title}"\n\n⚠️ Tasks require date and time.\n\nWhen to remind?\n"tomorrow at 10:00" or "in 2 hours"`,
         task: null, needsTime: true, pendingTitle: title,
       };
@@ -361,7 +405,7 @@ function generateAIResponse(
     const done = tasks.filter((t) => t.status === "done").length;
     return {
       responseText: ru
-        ? `📊 Статистика:\n\n✅ Выполнено: ${done}\n📋 Активных: ${activeTasks.length}\n📁 Всего: ${tasks.length}\n\n${done > 0 ? `🎉 Уже выполнено ${done}!` : "💪 Начинай!"}`
+        ? `📊 Статистика:\n\n✅ Выполнено: ${done}\n📋 Активных: ${activeTasks.length}\n📁 Всего: ${tasks.length}\n\n${done > 0 ? `🎉 Выполнено ${done}!` : "💪 Начинай!"}`
         : `📊 Stats:\n\n✅ Done: ${done}\n📋 Active: ${activeTasks.length}\n📁 Total: ${tasks.length}`,
       task: null,
     };
@@ -391,8 +435,8 @@ function generateAIResponse(
   if (lower.includes("помог") || lower.includes("help") || lower.includes("умеешь")) {
     return {
       responseText: ru
-        ? `🤖 ${assistantName} умеет:\n\n📌 Создавать задачи:\n"завтра в 10 встреча"\n"через 30 мин позвонить"\n\n📅 Показывать план:\n"что у меня сегодня?"\n\n📊 Анализировать:\n"оптимизируй задачи"\n\n🧘 Помогать:\n"я в стрессе"\n\n⚠️ Задачи создаются только с датой и временем!`
-        : `🤖 ${assistantName} can:\n\n📌 Create tasks:\n"meeting tomorrow at 10"\n"call in 30 min"\n\n📅 Show plan:\n"what do I have today?"\n\n📊 Analyze:\n"optimize tasks"\n\n🧘 Help:\n"I'm stressed"\n\n⚠️ Tasks require date and time!`,
+        ? `🤖 ${assistantName} умеет:\n\n📌 Задачи (с датой!):\n"завтра в 10 встреча"\n"через 30 мин позвонить"\n"сегодня вечером купить"\n\n📅 План дня:\n"что у меня сегодня?"\n\n📊 Анализ:\n"оптимизируй задачи"\n\n🧘 Поддержка:\n"я в стрессе"\n\n⚠️ Задачи без времени не создаются!`
+        : `🤖 ${assistantName} can:\n\n📌 Tasks (with time!):\n"meeting tomorrow at 10"\n"call in 30 min"\n\n📅 Day plan:\n"what do I have today?"\n\n📊 Analysis:\n"optimize tasks"\n\n🧘 Support:\n"I'm stressed"\n\n⚠️ Tasks require date/time!`,
       task: null,
     };
   }
@@ -400,13 +444,13 @@ function generateAIResponse(
   // Дефолт
   const defaults = ru
     ? [
-        `Попробуй написать задачу с временем:\n"завтра в 14:00 встреча" 📌\n\n⚠️ Без даты/времени задача не создаётся.`,
+        `Попробуй написать задачу с временем:\n"завтра в 14:00 встреча" 📌`,
         `Могу показать задачи — напиши "что у меня сегодня?" 📅`,
         `Напиши задачу с временем — ${assistantName} поставит напоминание! ⏰`,
       ]
     : [
-        `Try a task with time:\n"meeting tomorrow at 14:00" 📌\n\n⚠️ Tasks require date/time.`,
-        `Show tasks — write "what do I have today?" 📅`,
+        `Try: "meeting tomorrow at 14:00" 📌`,
+        `Write "what do I have today?" to see tasks 📅`,
         `Write task with time — ${assistantName} will set reminder! ⏰`,
       ];
 
@@ -417,7 +461,7 @@ const DEFAULT_MESSAGE = (ru: boolean, name: string): Message => ({
   role: "assistant",
   content: ru
     ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\nПопробуй:\n• "завтра в 12:00 совещание" → поставлю напоминание\n• "что у меня сегодня?" → покажу список\n• "я в стрессе" → помогу\n• 🎤 Нажми микрофон для голосового ввода\n\n⚠️ Задачи создаются только с датой и временем`
-    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nTry:\n• "meeting tomorrow at 12:00" → I'll set reminder\n• "what today?" → show list\n• "I'm stressed" → I'll help\n• 🎤 Tap mic for voice input\n\n⚠️ Tasks require date and time`,
+    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nTry:\n• "meeting tomorrow at 12:00" → I'll set reminder\n• "what today?" → show list\n• "I'm stressed" → I'll help\n• 🎤 Tap mic for voice\n\n⚠️ Tasks require date and time`,
 });
 
 export default function AiProcessPage() {
@@ -439,34 +483,40 @@ export default function AiProcessPage() {
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // БЛОК 4 — правильная проверка подписки
   const [hasSubscription, setHasSubscription] = useState<boolean | null>(null);
+
   const [aiUsageCount, setAiUsageCount] = useState(() => {
     const today = new Date().toISOString().split("T")[0];
     const stored = localStorage.getItem(`ai-usage-${today}`);
     return stored ? parseInt(stored) : 0;
   });
 
-  // Состояния для диалога
   const [pendingTask, setPendingTask] = useState<{ title: string; dueDate?: string } | null>(null);
   const [waitingAdvance, setWaitingAdvance] = useState(false);
 
-  // Защита от дублирования
   const sendingRef = useRef(false);
-
-  // Голосовой ввод
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
-
-  // Копирование
   const [copiedId, setCopiedId] = useState<number | null>(null);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Загружаем статус подписки
   useEffect(() => {
     const userId = getTelegramUserId();
-    checkSubscription(userId).then(setHasSubscription);
+    checkSubscription(userId).then((result) => {
+      setHasSubscription(result);
+    });
   }, []);
+
+  // БЛОК 4 — сбрасываем счётчик если есть подписка
+  useEffect(() => {
+    if (hasSubscription === true) {
+      setAiUsageCount(0);
+    }
+  }, [hasSubscription]);
 
   useEffect(() => {
     saveChatHistory(messages);
@@ -532,17 +582,17 @@ export default function AiProcessPage() {
     : ["what do I have today?", "optimize tasks", "I'm stressed", "where to start?"];
 
   const sendMessage = async (text?: string) => {
-    // Защита от дублирования
     if (sendingRef.current) return;
     const messageText = (text || input).trim();
     if (!messageText || loading) return;
 
-    if (!hasSubscription && aiUsageCount >= AI_FREE_LIMIT) {
+    // БЛОК 4 — лимит только для тех у кого точно нет подписки
+    if (hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT) {
       const tg = (window as any).Telegram?.WebApp;
       tg?.showAlert(
         ru
-          ? `Лимит ${AI_FREE_LIMIT} запросов в день исчерпан 🤖\n\nОформи подписку (100 Stars/мес) для безлимитного доступа.\n\nНапиши боту /subscribe`
-          : `Daily limit of ${AI_FREE_LIMIT} requests reached 🤖\n\nGet subscription for unlimited access.\n\nSend /subscribe`
+          ? `Лимит ${AI_FREE_LIMIT} запросов в день исчерпан 🤖\n\nОформи подписку (100 Stars/мес).\n\nНапиши боту /subscribe`
+          : `Daily limit of ${AI_FREE_LIMIT} requests reached 🤖\n\nGet subscription.\n\nSend /subscribe`
       );
       tg?.openTelegramLink("https://t.me/aiplannerrubot");
       return;
@@ -555,19 +605,22 @@ export default function AiProcessPage() {
     setInput("");
     setLoading(true);
 
-    const today = new Date().toISOString().split("T")[0];
-    const newCount = aiUsageCount + 1;
-    setAiUsageCount(newCount);
-    localStorage.setItem(`ai-usage-${today}`, String(newCount));
+    // Считаем запросы только если нет подписки
+    if (hasSubscription === false) {
+      const today = new Date().toISOString().split("T")[0];
+      const newCount = aiUsageCount + 1;
+      setAiUsageCount(newCount);
+      localStorage.setItem(`ai-usage-${today}`, String(newCount));
+    }
 
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // БЛОК 2 — минимальная задержка для UX
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     const { responseText, task, needsTime, pendingTitle, needsAdvance } = generateAIResponse(
       messageText, tasks, language, birthdays, assistantName,
       pendingTask, waitingAdvance
     );
 
-    // Обновляем состояние диалога
     if (task && task.title) {
       await addTask({
         title: task.title,
@@ -580,7 +633,6 @@ export default function AiProcessPage() {
       setPendingTask(null);
       setWaitingAdvance(false);
     } else if (needsAdvance && pendingTitle) {
-      // Ждём "за сколько напомнить" — сохраняем задачу с датой
       const dueDate = parseTimeFromText(messageText);
       setPendingTask({ title: pendingTitle, dueDate: dueDate?.toISOString() });
       setWaitingAdvance(true);
@@ -597,7 +649,8 @@ export default function AiProcessPage() {
     sendingRef.current = false;
   };
 
-  const isLimited = !hasSubscription && aiUsageCount >= AI_FREE_LIMIT;
+  // БЛОК 4 — null означает что ещё загружается, не показываем лимит
+  const isLimited = hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 120px)", maxHeight: "calc(100vh - 120px)", overflow: "hidden" }}>
@@ -610,12 +663,17 @@ export default function AiProcessPage() {
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <p style={{ fontSize: "15px", fontWeight: 700, color: "white", margin: 0 }}>{assistantName}</p>
-            <button onClick={() => { setNewName(assistantName); setShowNameEdit(true); }} style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", fontSize: "12px", color: "rgba(255,255,255,0.3)" }}>
+            <button
+              onClick={() => { setNewName(assistantName); setShowNameEdit(true); }}
+              style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", fontSize: "12px", color: "rgba(255,255,255,0.3)" }}
+            >
               ✏️
             </button>
           </div>
           <p style={{ fontSize: "11px", color: isLimited ? "#fca5a5" : "rgba(255,255,255,0.4)", margin: 0 }}>
-            {hasSubscription
+            {hasSubscription === null
+              ? (ru ? "Загрузка..." : "Loading...")
+              : hasSubscription
               ? (ru ? "Подписка активна ✅" : "Subscription active ✅")
               : isLimited
               ? (ru ? "Лимит исчерпан — оформи подписку" : "Limit reached — get subscription")
@@ -700,17 +758,9 @@ export default function AiProcessPage() {
                   {msg.content}
                 </p>
               </div>
-
-              {/* Кнопка копирования */}
               <button
                 onClick={() => copyMessage(msg.content, i)}
-                style={{
-                  position: "absolute", bottom: "-18px",
-                  right: msg.role === "user" ? "0" : "auto",
-                  left: msg.role === "assistant" ? "0" : "auto",
-                  background: "none", border: "none", cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: "3px", padding: "2px 4px",
-                }}
+                style={{ position: "absolute", bottom: "-18px", right: msg.role === "user" ? "0" : "auto", left: msg.role === "assistant" ? "0" : "auto", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px", padding: "2px 4px" }}
               >
                 {copiedId === i
                   ? <><Check size={11} color="#22c55e" /><span style={{ fontSize: "10px", color: "#22c55e" }}>{ru ? "Скопировано" : "Copied"}</span></>
@@ -735,8 +785,6 @@ export default function AiProcessPage() {
 
       {/* Поле ввода */}
       <div style={{ display: "flex", gap: "6px", alignItems: "flex-end", paddingTop: "16px", borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
-
-        {/* Микрофон */}
         <button
           onClick={isListening ? stopListening : startListening}
           disabled={isLimited}
