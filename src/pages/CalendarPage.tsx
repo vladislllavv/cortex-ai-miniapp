@@ -25,24 +25,6 @@ function formatTime(isoString: string): string {
   }
 }
 
-function getDayColor(dateStr: string, birthdays: Birthday[], vacations: Vacation[]): {
-  bg: string;
-  dot: string;
-  label: string;
-} | null {
-  // Отпуск
-  const vacation = vacations.find((v) => dateStr >= v.startDate && dateStr <= v.endDate);
-  if (vacation) return { bg: `${vacation.color}30`, dot: vacation.color, label: "отпуск" };
-
-  // День рождения
-  const month = dateStr.slice(5, 7);
-  const day = dateStr.slice(8, 10);
-  const birthday = birthdays.find((b) => b.date === `${month}-${day}`);
-  if (birthday) return { bg: `${birthday.color}30`, dot: birthday.color, label: birthday.name };
-
-  return null;
-}
-
 export default function CalendarPage() {
   const language = useI18nStore((state) => state.language);
   const tasks = useTaskStore((state) => state.tasks);
@@ -61,18 +43,13 @@ export default function CalendarPage() {
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState<string>(today.toISOString().split("T")[0]);
-
-  // Модальные окна
   const [showAddBirthday, setShowAddBirthday] = useState(false);
   const [showAddVacation, setShowAddVacation] = useState(false);
   const [showPanel, setShowPanel] = useState<"none" | "birthdays" | "vacations">("none");
 
-  // Форма дня рождения
   const [bdName, setBdName] = useState("");
   const [bdDate, setBdDate] = useState("");
   const [bdColor, setBdColor] = useState("#3b82f6");
-
-  // Форма отпуска
   const [vacTitle, setVacTitle] = useState("");
   const [vacStart, setVacStart] = useState("");
   const [vacEnd, setVacEnd] = useState("");
@@ -134,18 +111,14 @@ export default function CalendarPage() {
   return (
     <div style={{ paddingTop: "8px", paddingBottom: "20px" }}>
 
-      {/* Заголовок месяца */}
+      {/* Заголовок */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
         <button onClick={prevMonth} style={navBtnStyle}>
           <ChevronLeft size={18} color="white" />
         </button>
         <div style={{ textAlign: "center" }}>
-          <p style={{ fontSize: "18px", fontWeight: 700, color: "white", margin: 0 }}>
-            {months[currentMonth]}
-          </p>
-          <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
-            {currentYear}
-          </p>
+          <p style={{ fontSize: "18px", fontWeight: 700, color: "white", margin: 0 }}>{months[currentMonth]}</p>
+          <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{currentYear}</p>
         </div>
         <button onClick={nextMonth} style={navBtnStyle}>
           <ChevronRight size={18} color="white" />
@@ -153,7 +126,7 @@ export default function CalendarPage() {
       </div>
 
       {/* Быстрые кнопки */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "14px", overflowX: "auto" }}>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "12px", overflowX: "auto" }}>
         {[
           { id: "birthdays" as const, icon: "🎂", label: ru ? "ДР" : "BD" },
           { id: "vacations" as const, icon: "🌴", label: ru ? "Отпуск" : "Vacation" },
@@ -162,18 +135,12 @@ export default function CalendarPage() {
             key={id}
             onClick={() => setShowPanel(showPanel === id ? "none" : id)}
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              padding: "6px 12px",
-              borderRadius: "20px",
+              display: "flex", alignItems: "center", gap: "4px",
+              padding: "6px 12px", borderRadius: "20px",
               border: showPanel === id ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.1)",
               backgroundColor: showPanel === id ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)",
               color: showPanel === id ? "#60a5fa" : "rgba(255,255,255,0.6)",
-              fontSize: "12px",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
+              fontSize: "12px", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
             }}
           >
             {icon} {label}
@@ -186,24 +153,18 @@ export default function CalendarPage() {
         <div style={panelStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
             <p style={{ fontSize: "14px", fontWeight: 600, color: "white", margin: 0 }}>🎂 Дни рождения</p>
-            <button onClick={() => setShowAddBirthday(true)} style={addBtnStyle}>
-              <Plus size={14} color="white" />
-            </button>
+            <button onClick={() => setShowAddBirthday(true)} style={addBtnStyle}><Plus size={14} color="white" /></button>
           </div>
-          {birthdays.length === 0 ? (
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.3)", margin: 0 }}>Нет дней рождения</p>
-          ) : (
-            birthdays.map((b) => (
+          {birthdays.length === 0
+            ? <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.3)", margin: 0 }}>Нет дней рождения</p>
+            : birthdays.map((b) => (
               <div key={b.id} style={listItemStyle}>
                 <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: b.color, flexShrink: 0 }} />
                 <span style={{ fontSize: "13px", color: "white", flex: 1 }}>{b.name}</span>
                 <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)" }}>{b.date}</span>
-                <button onClick={() => deleteBirthday(b.id)} style={deleteBtnStyle}>
-                  <Trash2 size={12} color="#ef4444" />
-                </button>
+                <button onClick={() => deleteBirthday(b.id)} style={deleteBtnStyle}><Trash2 size={12} color="#ef4444" /></button>
               </div>
-            ))
-          )}
+            ))}
         </div>
       )}
 
@@ -212,45 +173,43 @@ export default function CalendarPage() {
         <div style={panelStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
             <p style={{ fontSize: "14px", fontWeight: 600, color: "white", margin: 0 }}>🌴 Отпуска</p>
-            <button onClick={() => setShowAddVacation(true)} style={addBtnStyle}>
-              <Plus size={14} color="white" />
-            </button>
+            <button onClick={() => setShowAddVacation(true)} style={addBtnStyle}><Plus size={14} color="white" /></button>
           </div>
-          {vacations.length === 0 ? (
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.3)", margin: 0 }}>Нет отпусков</p>
-          ) : (
-            vacations.map((v) => (
+          {vacations.length === 0
+            ? <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.3)", margin: 0 }}>Нет отпусков</p>
+            : vacations.map((v) => (
               <div key={v.id} style={listItemStyle}>
                 <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: v.color, flexShrink: 0 }} />
                 <span style={{ fontSize: "13px", color: "white", flex: 1 }}>{v.title}</span>
                 <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)" }}>{v.startDate} — {v.endDate}</span>
-                <button onClick={() => deleteVacation(v.id)} style={deleteBtnStyle}>
-                  <Trash2 size={12} color="#ef4444" />
-                </button>
+                <button onClick={() => deleteVacation(v.id)} style={deleteBtnStyle}><Trash2 size={12} color="#ef4444" /></button>
               </div>
-            ))
-          )}
+            ))}
         </div>
       )}
 
       {/* Легенда */}
       <div style={{ display: "flex", gap: "12px", marginBottom: "10px", flexWrap: "wrap" }}>
         {[
-          { color: "#ef4444", label: ru ? "Праздник" : "Holiday" },
-          { color: "#3b82f6", label: ru ? "День рождения" : "Birthday" },
+          { color: "#ef4444", label: ru ? "Праздник/выходной" : "Holiday" },
+          { color: "#3b82f6", label: ru ? "Сегодня/ДР" : "Today/BD" },
           { color: "#22c55e", label: ru ? "Отпуск" : "Vacation" },
         ].map(({ color, label }) => (
           <div key={label} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <div style={{ width: "8px", height: "8px", borderRadius: "2px", backgroundColor: color }} />
+            <div style={{ width: "10px", height: "10px", borderRadius: "3px", backgroundColor: color }} />
             <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.4)" }}>{label}</span>
           </div>
         ))}
       </div>
 
       {/* Дни недели */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: "6px" }}>
-        {WEEKDAYS_RU.map((day) => (
-          <div key={day} style={{ textAlign: "center", fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.35)", paddingBottom: "4px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: "4px" }}>
+        {WEEKDAYS_RU.map((day, i) => (
+          <div key={day} style={{
+            textAlign: "center", fontSize: "11px", fontWeight: 600,
+            color: i >= 5 ? "rgba(239,68,68,0.7)" : "rgba(255,255,255,0.35)",
+            paddingBottom: "4px",
+          }}>
             {day}
           </div>
         ))}
@@ -267,33 +226,54 @@ export default function CalendarPage() {
           const holiday = isHoliday(dateStr);
           const weekend = isWeekend(dateStr);
           const taskCount = tasksByDate[dateStr] || 0;
-          const dayInfo = getDayColor(dateStr, birthdays, vacations);
 
           const month = dateStr.slice(5, 7);
           const dayPart = dateStr.slice(8, 10);
           const isBirthday = birthdays.some((b) => b.date === `${month}-${dayPart}`);
           const isVacation = vacations.some((v) => dateStr >= v.startDate && dateStr <= v.endDate);
 
+          // Определяем фон
           let bgColor = "rgba(255,255,255,0.04)";
-          if (isSelected) bgColor = "#3b82f6";
-          else if (isToday) bgColor = "rgba(59,130,246,0.2)";
-          else if (isVacation) bgColor = "rgba(34,197,94,0.15)";
-          else if (isBirthday) bgColor = "rgba(59,130,246,0.12)";
+          let textColor = "rgba(255,255,255,0.85)";
+          let borderColor = "transparent";
 
-          let textColor = "rgba(255,255,255,0.8)";
-          if (isSelected) textColor = "white";
-          else if (isToday) textColor = "#3b82f6";
-          else if (holiday || (weekend && !isVacation)) textColor = "#ef4444";
+          if (isSelected) {
+            bgColor = "#1d4ed8";
+            textColor = "white";
+            borderColor = "#3b82f6";
+          } else if (isToday) {
+            // Синий фон для сегодня
+            bgColor = "#2563eb";
+            textColor = "white";
+            borderColor = "#60a5fa";
+          } else if (holiday) {
+            // Красный фон для праздников
+            bgColor = "rgba(239,68,68,0.25)";
+            textColor = "#fca5a5";
+            borderColor = "rgba(239,68,68,0.4)";
+          } else if (weekend) {
+            // Красный фон для выходных
+            bgColor = "rgba(239,68,68,0.12)";
+            textColor = "#fca5a5";
+            borderColor = "rgba(239,68,68,0.2)";
+          } else if (isVacation) {
+            bgColor = "rgba(34,197,94,0.15)";
+            textColor = "#86efac";
+            borderColor = "rgba(34,197,94,0.2)";
+          } else if (isBirthday) {
+            bgColor = "rgba(59,130,246,0.15)";
+            textColor = "#93c5fd";
+            borderColor = "rgba(59,130,246,0.2)";
+          }
 
           return (
             <button
               key={dateStr}
               onClick={() => setSelectedDate(dateStr)}
               style={{
-                position: "relative",
-                height: "38px",
+                height: "40px",
                 borderRadius: "8px",
-                border: holiday ? "1px solid rgba(239,68,68,0.3)" : "1px solid transparent",
+                border: `1px solid ${borderColor}`,
                 cursor: "pointer",
                 display: "flex",
                 flexDirection: "column",
@@ -304,16 +284,20 @@ export default function CalendarPage() {
                 transition: "all 0.15s ease",
               }}
             >
-              <span style={{ fontSize: "13px", fontWeight: isToday || isSelected ? 700 : 400, color: textColor }}>
+              <span style={{
+                fontSize: "13px",
+                fontWeight: isToday || isSelected ? 700 : 400,
+                color: textColor,
+              }}>
                 {day}
               </span>
 
               {/* Точки */}
               <div style={{ display: "flex", gap: "2px" }}>
                 {taskCount > 0 && (
-                  <div style={{ width: "4px", height: "4px", borderRadius: "50%", backgroundColor: isSelected ? "white" : "#60a5fa" }} />
+                  <div style={{ width: "4px", height: "4px", borderRadius: "50%", backgroundColor: isSelected || isToday ? "white" : "#60a5fa" }} />
                 )}
-                {isBirthday && !isSelected && (
+                {isBirthday && !isSelected && !isToday && (
                   <div style={{ width: "4px", height: "4px", borderRadius: "50%", backgroundColor: "#3b82f6" }} />
                 )}
                 {isVacation && !isSelected && (
@@ -326,43 +310,34 @@ export default function CalendarPage() {
       </div>
 
       {/* Информация о выбранном дне */}
-      <div style={{ marginBottom: "12px" }}>
-        {isHoliday(selectedDate) && (
-          <div style={{
-            backgroundColor: "rgba(239,68,68,0.1)",
-            border: "1px solid rgba(239,68,68,0.2)",
-            borderRadius: "10px",
-            padding: "8px 12px",
-            marginBottom: "8px",
-          }}>
-            <p style={{ fontSize: "12px", color: "#fca5a5", margin: 0 }}>
-              🎉 {getHolidayName(selectedDate)}
-            </p>
-          </div>
-        )}
+      {(isHoliday(selectedDate) || birthdays.some((b) => {
+        const month = selectedDate.slice(5, 7);
+        const day = selectedDate.slice(8, 10);
+        return b.date === `${month}-${day}`;
+      })) && (
+        <div style={{ marginBottom: "12px" }}>
+          {isHoliday(selectedDate) && (
+            <div style={{ backgroundColor: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", padding: "8px 12px", marginBottom: "6px" }}>
+              <p style={{ fontSize: "12px", color: "#fca5a5", margin: 0 }}>🎉 {getHolidayName(selectedDate)}</p>
+            </div>
+          )}
+          {birthdays.filter((b) => {
+            const month = selectedDate.slice(5, 7);
+            const day = selectedDate.slice(8, 10);
+            return b.date === `${month}-${day}`;
+          }).map((b) => (
+            <div key={b.id} style={{ backgroundColor: `${b.color}15`, border: `1px solid ${b.color}30`, borderRadius: "10px", padding: "8px 12px", marginBottom: "6px" }}>
+              <p style={{ fontSize: "12px", color: b.color, margin: 0 }}>🎂 День рождения: {b.name}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
-        {birthdays.filter((b) => {
-          const month = selectedDate.slice(5, 7);
-          const day = selectedDate.slice(8, 10);
-          return b.date === `${month}-${day}`;
-        }).map((b) => (
-          <div key={b.id} style={{
-            backgroundColor: `${b.color}15`,
-            border: `1px solid ${b.color}30`,
-            borderRadius: "10px",
-            padding: "8px 12px",
-            marginBottom: "8px",
-          }}>
-            <p style={{ fontSize: "12px", color: b.color, margin: 0 }}>
-              🎂 День рождения: {b.name}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {/* Задачи выбранного дня */}
+      {/* Задачи */}
       <p style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.5)", marginBottom: "8px" }}>
-        {selectedDate === todayStr ? (ru ? "Сегодня" : "Today") : new Date(selectedDate + "T12:00:00").toLocaleDateString(ru ? "ru-RU" : "en-US", { day: "numeric", month: "long" })}
+        {selectedDate === todayStr
+          ? (ru ? "Сегодня" : "Today")
+          : new Date(selectedDate + "T12:00:00").toLocaleDateString(ru ? "ru-RU" : "en-US", { day: "numeric", month: "long" })}
         {" "}<span style={{ color: "rgba(255,255,255,0.25)" }}>({selectedTasks.length})</span>
       </p>
 
@@ -375,24 +350,14 @@ export default function CalendarPage() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {selectedTasks.map((task) => (
-            <div
-              key={task.id}
-              onClick={() => toggleTaskStatus(task.id)}
-              style={{
-                backgroundColor: "rgba(255,255,255,0.06)",
-                borderRadius: "12px",
-                padding: "10px 12px",
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                cursor: "pointer",
-                border: "1px solid rgba(255,255,255,0.07)",
-                opacity: task.status === "done" ? 0.5 : 1,
-              }}
-            >
+            <div key={task.id} onClick={() => toggleTaskStatus(task.id)} style={{
+              backgroundColor: "rgba(255,255,255,0.06)", borderRadius: "12px",
+              padding: "10px 12px", display: "flex", alignItems: "center",
+              gap: "10px", cursor: "pointer", border: "1px solid rgba(255,255,255,0.07)",
+              opacity: task.status === "done" ? 0.5 : 1,
+            }}>
               <div style={{
-                width: "20px", height: "20px", minWidth: "20px",
-                borderRadius: "50%",
+                width: "20px", height: "20px", minWidth: "20px", borderRadius: "50%",
                 border: `2px solid ${task.status === "done" ? "#3b82f6" : "rgba(255,255,255,0.25)"}`,
                 backgroundColor: task.status === "done" ? "#3b82f6" : "transparent",
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -415,9 +380,7 @@ export default function CalendarPage() {
                 {task.dueDate && (
                   <div style={{ display: "flex", alignItems: "center", gap: "3px" }}>
                     <Clock size={11} color="rgba(255,255,255,0.35)" />
-                    <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)" }}>
-                      {formatTime(task.dueDate)}
-                    </span>
+                    <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)" }}>{formatTime(task.dueDate)}</span>
                   </div>
                 )}
               </div>
@@ -426,118 +389,66 @@ export default function CalendarPage() {
         </div>
       )}
 
-      {/* Модальное окно добавления ДР */}
+      {/* Модалки */}
       {showAddBirthday && (
-        <Modal title="🎂 Добавить день рождения" onClose={() => setShowAddBirthday(false)}>
+        <Modal title="🎂 День рождения" onClose={() => setShowAddBirthday(false)}>
           <ModalField label="Имя">
-            <input
-              value={bdName}
-              onChange={(e) => setBdName(e.target.value)}
-              placeholder="Имя человека"
-              style={inputStyle}
-            />
+            <input value={bdName} onChange={(e) => setBdName(e.target.value)} placeholder="Имя человека" style={inputStyle} />
           </ModalField>
-          <ModalField label="Дата рождения">
-            <input
-              type="date"
-              value={bdDate}
-              onChange={(e) => setBdDate(e.target.value)}
-              style={{ ...inputStyle, colorScheme: "dark" }}
-            />
+          <ModalField label="Дата">
+            <input type="date" value={bdDate} onChange={(e) => setBdDate(e.target.value)} style={{ ...inputStyle, colorScheme: "dark" }} />
           </ModalField>
           <ModalField label="Цвет">
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              {["#3b82f6", "#ef4444", "#f59e0b", "#22c55e", "#a855f7", "#ec4899"].map((color) => (
-                <button
-                  key={color}
-                  onClick={() => setBdColor(color)}
-                  style={{
-                    width: "28px", height: "28px", borderRadius: "50%",
-                    backgroundColor: color, border: bdColor === color ? "3px solid white" : "2px solid transparent",
-                    cursor: "pointer",
-                  }}
-                />
-              ))}
-            </div>
+            <ColorPicker value={bdColor} onChange={setBdColor} />
           </ModalField>
-          <button onClick={handleAddBirthday} style={saveButtonStyle}>
-            Сохранить
-          </button>
+          <button onClick={handleAddBirthday} style={saveButtonStyle}>Сохранить</button>
         </Modal>
       )}
 
-      {/* Модальное окно добавления отпуска */}
       {showAddVacation && (
-        <Modal title="🌴 Добавить отпуск" onClose={() => setShowAddVacation(false)}>
+        <Modal title="🌴 Отпуск" onClose={() => setShowAddVacation(false)}>
           <ModalField label="Название">
-            <input
-              value={vacTitle}
-              onChange={(e) => setVacTitle(e.target.value)}
-              placeholder="Например: Отпуск в Сочи"
-              style={inputStyle}
-            />
+            <input value={vacTitle} onChange={(e) => setVacTitle(e.target.value)} placeholder="Например: Отпуск в Сочи" style={inputStyle} />
           </ModalField>
           <ModalField label="Начало">
-            <input
-              type="date"
-              value={vacStart}
-              onChange={(e) => setVacStart(e.target.value)}
-              style={{ ...inputStyle, colorScheme: "dark" }}
-            />
+            <input type="date" value={vacStart} onChange={(e) => setVacStart(e.target.value)} style={{ ...inputStyle, colorScheme: "dark" }} />
           </ModalField>
           <ModalField label="Конец">
-            <input
-              type="date"
-              value={vacEnd}
-              onChange={(e) => setVacEnd(e.target.value)}
-              style={{ ...inputStyle, colorScheme: "dark" }}
-            />
+            <input type="date" value={vacEnd} onChange={(e) => setVacEnd(e.target.value)} style={{ ...inputStyle, colorScheme: "dark" }} />
           </ModalField>
           <ModalField label="Цвет">
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              {["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#ec4899"].map((color) => (
-                <button
-                  key={color}
-                  onClick={() => setVacColor(color)}
-                  style={{
-                    width: "28px", height: "28px", borderRadius: "50%",
-                    backgroundColor: color, border: vacColor === color ? "3px solid white" : "2px solid transparent",
-                    cursor: "pointer",
-                  }}
-                />
-              ))}
-            </div>
+            <ColorPicker value={vacColor} onChange={setVacColor} colors={["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#ec4899"]} />
           </ModalField>
-          <button onClick={handleAddVacation} style={saveButtonStyle}>
-            Сохранить
-          </button>
+          <button onClick={handleAddVacation} style={saveButtonStyle}>Сохранить</button>
         </Modal>
       )}
     </div>
   );
 }
 
-// Вспомогательные компоненты и стили
+function ColorPicker({ value, onChange, colors }: { value: string; onChange: (c: string) => void; colors?: string[] }) {
+  const defaultColors = ["#3b82f6", "#ef4444", "#f59e0b", "#22c55e", "#a855f7", "#ec4899"];
+  return (
+    <div style={{ display: "flex", gap: "8px" }}>
+      {(colors || defaultColors).map((color) => (
+        <button key={color} onClick={() => onChange(color)} style={{
+          width: "28px", height: "28px", borderRadius: "50%",
+          backgroundColor: color,
+          border: value === color ? "3px solid white" : "2px solid transparent",
+          cursor: "pointer",
+        }} />
+      ))}
+    </div>
+  );
+}
+
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 200,
-      backgroundColor: "rgba(0,0,0,0.7)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: "16px",
-    }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{
-        backgroundColor: "#1e293b",
-        borderRadius: "20px", padding: "20px",
-        width: "100%", maxWidth: "320px",
-        border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
-      }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 200, backgroundColor: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "#1e293b", borderRadius: "20px", padding: "20px", width: "100%", maxWidth: "320px", border: "1px solid rgba(255,255,255,0.08)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
           <p style={{ fontSize: "15px", fontWeight: 700, color: "white", margin: 0 }}>{title}</p>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.4)" }}>
-            <X size={18} />
-          </button>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.4)" }}><X size={18} /></button>
         </div>
         {children}
       </div>
@@ -554,57 +465,10 @@ function ModalField({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-const navBtnStyle: React.CSSProperties = {
-  background: "rgba(255,255,255,0.08)",
-  border: "none", borderRadius: "10px",
-  width: "36px", height: "36px",
-  display: "flex", alignItems: "center", justifyContent: "center",
-  cursor: "pointer",
-};
-
-const panelStyle: React.CSSProperties = {
-  backgroundColor: "rgba(255,255,255,0.05)",
-  border: "1px solid rgba(255,255,255,0.08)",
-  borderRadius: "14px", padding: "14px",
-  marginBottom: "14px",
-};
-
-const listItemStyle: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: "8px",
-  padding: "6px 0",
-  borderBottom: "1px solid rgba(255,255,255,0.05)",
-};
-
-const addBtnStyle: React.CSSProperties = {
-  width: "28px", height: "28px",
-  borderRadius: "50%",
-  backgroundColor: "#3b82f6",
-  border: "none", cursor: "pointer",
-  display: "flex", alignItems: "center", justifyContent: "center",
-};
-
-const deleteBtnStyle: React.CSSProperties = {
-  background: "none", border: "none",
-  cursor: "pointer", padding: "2px",
-  display: "flex", alignItems: "center",
-};
-
-const inputStyle: React.CSSProperties = {
-  display: "block", width: "100%",
-  boxSizing: "border-box" as const,
-  height: "40px", borderRadius: "10px",
-  border: "1px solid rgba(255,255,255,0.1)",
-  backgroundColor: "rgba(255,255,255,0.07)",
-  paddingLeft: "12px", paddingRight: "12px",
-  fontSize: "14px", color: "white",
-  outline: "none", fontFamily: "inherit",
-};
-
-const saveButtonStyle: React.CSSProperties = {
-  width: "100%", height: "42px",
-  borderRadius: "12px", border: "none",
-  backgroundColor: "#3b82f6",
-  fontSize: "14px", fontWeight: 600,
-  color: "white", cursor: "pointer",
-  marginTop: "4px",
-};
+const navBtnStyle: React.CSSProperties = { background: "rgba(255,255,255,0.08)", border: "none", borderRadius: "10px", width: "36px", height: "36px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
+const panelStyle: React.CSSProperties = { backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "14px", padding: "14px", marginBottom: "14px" };
+const listItemStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" };
+const addBtnStyle: React.CSSProperties = { width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#3b82f6", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
+const deleteBtnStyle: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" };
+const inputStyle: React.CSSProperties = { display: "block", width: "100%", boxSizing: "border-box" as const, height: "40px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "12px", paddingRight: "12px", fontSize: "14px", color: "white", outline: "none", fontFamily: "inherit" };
+const saveButtonStyle: React.CSSProperties = { width: "100%", height: "42px", borderRadius: "12px", border: "none", backgroundColor: "#3b82f6", fontSize: "14px", fontWeight: 600, color: "white", cursor: "pointer", marginTop: "4px" };
