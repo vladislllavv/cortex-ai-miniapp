@@ -1,14 +1,18 @@
 import { useState, useMemo } from "react";
 import TaskCard from "@/components/TaskCard";
-import { useTaskStore, getTelegramUserId } from "@/lib/store";
+import { useTaskStore } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
-import { Plus, ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 
 export default function HomePage() {
   const language = useI18nStore((state) => state.language);
   const tasks = useTaskStore((state) => state.tasks);
   const birthdays = useTaskStore((state) => state.birthdays);
+  const vacations = useTaskStore((state) => state.vacations);
   const categories = useTaskStore((state) => state.categories);
+  const categoryEvents = useTaskStore((state) => state.categoryEvents);
+  const deleteCategoryEvent = useTaskStore((state) => state.deleteCategoryEvent);
+  const isDataLoaded = useTaskStore((state) => state.isDataLoaded);
   const ru = language === "ru";
 
   const todayStr = new Date().toISOString().split("T")[0];
@@ -34,67 +38,75 @@ export default function HomePage() {
   const [showDone, setShowDone] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
+  // Данные для активного раздела
+  const activeSectionData = useMemo(() => {
+    if (!activeSection) return null;
+    if (activeSection === "birthdays") {
+      return birthdays.map((b) => ({
+        id: b.id, title: b.name,
+        subtitle: b.date, color: b.color, icon: "🎂",
+        type: "birthday" as const,
+      }));
+    }
+    if (activeSection === "vacations") {
+      return vacations.map((v) => ({
+        id: v.id, title: v.title,
+        subtitle: `${v.startDate} — ${v.endDate}`,
+        color: v.color, icon: "🌴",
+        type: "vacation" as const,
+      }));
+    }
+    // Кастомные категории
+    const events = categoryEvents.filter((e) => e.categoryId === activeSection);
+    return events.map((e) => {
+      const cat = categories.find((c) => c.id === e.categoryId);
+      return {
+        id: e.id, title: e.title,
+        subtitle: e.endDate ? `${e.date} — ${e.endDate}` : e.date,
+        color: e.color || cat?.color || "#3b82f6",
+        icon: cat?.icon || "📁",
+        type: "event" as const,
+      };
+    });
+  }, [activeSection, birthdays, vacations, categoryEvents, categories]);
+
   return (
     <div style={{ paddingTop: "8px" }}>
 
       {/* Брифинг */}
-      <div style={{
-        backgroundColor: "rgba(59,130,246,0.1)",
-        border: "1px solid rgba(59,130,246,0.2)",
-        borderRadius: "18px", padding: "16px",
-        marginBottom: "16px",
-      }}>
+      <div style={{ backgroundColor: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: "18px", padding: "16px", marginBottom: "16px" }}>
         <p style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", margin: "0 0 4px 0", textTransform: "uppercase", letterSpacing: "0.5px" }}>
           {ru ? "Ежедневный брифинг" : "Daily briefing"}
         </p>
         <p style={{ fontSize: "26px", fontWeight: 700, color: "white", margin: "0 0 4px 0", lineHeight: 1.2 }}>
-          {activeTasks.length} {ru ? "задач" : "tasks"}
+          {activeTasks.length} {ru ? (activeTasks.length === 1 ? "задача" : activeTasks.length < 5 ? "задачи" : "задач") : "tasks"}
         </p>
         <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
-          {todayTasks.length > 0
+          {activeTasks.length === 0
+            ? (ru ? "Все задачи выполнены! 🎉" : "All tasks done! 🎉")
+            : todayTasks.length > 0
             ? ru ? `${todayTasks.length} на сегодня` : `${todayTasks.length} for today`
             : ru ? "На сегодня задач нет" : "No tasks for today"}
         </p>
       </div>
 
-      {/* Дни рождения сегодня */}
+      {/* Уведомления о ДР */}
       {todayBirthdays.length > 0 && (
-        <div style={{
-          backgroundColor: "rgba(59,130,246,0.1)",
-          border: "1px solid rgba(59,130,246,0.2)",
-          borderRadius: "14px", padding: "12px 14px",
-          marginBottom: "12px",
-          display: "flex", alignItems: "center", gap: "10px",
-        }}>
+        <div style={{ backgroundColor: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "14px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
           <span style={{ fontSize: "20px" }}>🎂</span>
           <div>
-            <p style={{ fontSize: "13px", fontWeight: 600, color: "#93c5fd", margin: 0 }}>
-              {ru ? "День рождения сегодня!" : "Birthday today!"}
-            </p>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", margin: 0 }}>
-              {todayBirthdays.map((b) => b.name).join(", ")}
-            </p>
+            <p style={{ fontSize: "13px", fontWeight: 600, color: "#93c5fd", margin: 0 }}>{ru ? "День рождения сегодня!" : "Birthday today!"}</p>
+            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", margin: 0 }}>{todayBirthdays.map((b) => b.name).join(", ")}</p>
           </div>
         </div>
       )}
 
-      {/* Дни рождения завтра */}
       {tomorrowBirthdays.length > 0 && (
-        <div style={{
-          backgroundColor: "rgba(59,130,246,0.07)",
-          border: "1px solid rgba(59,130,246,0.15)",
-          borderRadius: "14px", padding: "12px 14px",
-          marginBottom: "12px",
-          display: "flex", alignItems: "center", gap: "10px",
-        }}>
+        <div style={{ backgroundColor: "rgba(59,130,246,0.07)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: "14px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
           <span style={{ fontSize: "20px" }}>🎂</span>
           <div>
-            <p style={{ fontSize: "13px", fontWeight: 600, color: "rgba(147,197,253,0.8)", margin: 0 }}>
-              {ru ? "День рождения завтра" : "Birthday tomorrow"}
-            </p>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
-              {tomorrowBirthdays.map((b) => b.name).join(", ")}
-            </p>
+            <p style={{ fontSize: "13px", fontWeight: 600, color: "rgba(147,197,253,0.8)", margin: 0 }}>{ru ? "День рождения завтра" : "Birthday tomorrow"}</p>
+            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{tomorrowBirthdays.map((b) => b.name).join(", ")}</p>
           </div>
         </div>
       )}
@@ -108,6 +120,12 @@ export default function HomePage() {
           <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "4px" }}>
             {categories.map((cat) => {
               const isActive = activeSection === cat.id;
+              // Считаем количество элементов в разделе
+              let count = 0;
+              if (cat.id === "birthdays") count = birthdays.length;
+              else if (cat.id === "vacations") count = vacations.length;
+              else count = categoryEvents.filter((e) => e.categoryId === cat.id).length;
+
               return (
                 <button
                   key={cat.id}
@@ -124,10 +142,44 @@ export default function HomePage() {
                 >
                   <span>{cat.icon}</span>
                   <span>{cat.name}</span>
+                  {count > 0 && (
+                    <span style={{ fontSize: "11px", backgroundColor: isActive ? `${cat.color}40` : "rgba(255,255,255,0.1)", borderRadius: "10px", padding: "1px 6px" }}>
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}
           </div>
+
+          {/* Содержимое активного раздела */}
+          {activeSection && activeSectionData !== null && (
+            <div style={{ marginTop: "10px", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: "14px", padding: "12px", border: "1px solid rgba(255,255,255,0.07)" }}>
+              {activeSectionData.length === 0 ? (
+                <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.3)", margin: 0, textAlign: "center" }}>
+                  {ru ? "Нет данных. Добавь в Календаре." : "No data. Add in Calendar."}
+                </p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {activeSectionData.map((item) => (
+                    <div key={item.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", backgroundColor: "rgba(255,255,255,0.05)", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <span style={{ fontSize: "16px" }}>{item.icon}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: "14px", fontWeight: 500, color: "white", margin: 0, wordBreak: "break-word" }}>{item.title}</p>
+                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{item.subtitle}</p>
+                      </div>
+                      <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: item.color, flexShrink: 0 }} />
+                      {item.type === "event" && (
+                        <button onClick={() => deleteCategoryEvent(item.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}>
+                          <Trash2 size={13} color="rgba(239,68,68,0.6)" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -151,10 +203,7 @@ export default function HomePage() {
       {/* Выполненные */}
       {doneTasks.length > 0 && (
         <div style={{ marginBottom: "16px" }}>
-          <button
-            onClick={() => setShowDone(!showDone)}
-            style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", padding: 0 }}
-          >
+          <button onClick={() => setShowDone(!showDone)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", padding: 0 }}>
             {showDone ? <ChevronDown size={14} color="rgba(255,255,255,0.35)" /> : <ChevronRight size={14} color="rgba(255,255,255,0.35)" />}
             <span style={{ fontSize: "14px", fontWeight: 600, color: "rgba(255,255,255,0.4)" }}>
               ✅ {ru ? "Выполненные" : "Completed"}{" "}
