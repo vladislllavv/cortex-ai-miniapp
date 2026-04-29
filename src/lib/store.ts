@@ -10,8 +10,6 @@ import {
   setDoc,
   deleteDoc,
   getDocs,
-  query,
-  where,
 } from "firebase/firestore";
 
 export type TaskPriority = "low" | "medium" | "high";
@@ -35,15 +33,15 @@ export type Task = {
 export type Birthday = {
   id: string;
   name: string;
-  date: string; // MM-DD format
+  date: string;
   color: string;
 };
 
 export type Vacation = {
   id: string;
   title: string;
-  startDate: string; // YYYY-MM-DD
-  endDate: string; // YYYY-MM-DD
+  startDate: string;
+  endDate: string;
   color: string;
 };
 
@@ -58,8 +56,10 @@ export type CategoryEvent = {
   id: string;
   categoryId: string;
   title: string;
-  date: string; // YYYY-MM-DD
+  date: string;
+  endDate?: string;
   notes?: string;
+  color?: string;
 };
 
 type TaskStore = {
@@ -69,6 +69,7 @@ type TaskStore = {
   categories: CustomCategory[];
   categoryEvents: CategoryEvent[];
   selectedDate: string | null;
+  isDataLoaded: boolean;
 
   addTask: (task: Omit<Task, "id" | "createdAt" | "notified">) => Promise<void>;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
@@ -86,8 +87,8 @@ type TaskStore = {
   updateCategory: (id: string, updates: Partial<CustomCategory>) => void;
   deleteCategory: (id: string) => void;
 
-  addCategoryEvent: (event: Omit<CategoryEvent, "id">) => void;
-  deleteCategoryEvent: (id: string) => void;
+  addCategoryEvent: (event: Omit<CategoryEvent, "id">) => Promise<void>;
+  deleteCategoryEvent: (id: string) => Promise<void>;
 
   loadUserData: (userId: string) => Promise<void>;
 };
@@ -98,9 +99,7 @@ const CATEGORIES_KEY = "cortex-categories";
 const CATEGORY_EVENTS_KEY = "cortex-category-events";
 
 export function saveChatHistory(messages: { role: string; content: string }[]) {
-  try {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
-  } catch {}
+  try { localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages)); } catch {}
 }
 
 export function loadChatHistory(): { role: string; content: string }[] {
@@ -115,9 +114,7 @@ export function getTelegramUserId(): string {
   try {
     const tg = (window as any).Telegram?.WebApp;
     if (!tg) return "unknown";
-    if (tg.initDataUnsafe?.user?.id) {
-      return String(tg.initDataUnsafe.user.id);
-    }
+    if (tg.initDataUnsafe?.user?.id) return String(tg.initDataUnsafe.user.id);
   } catch {}
   return "unknown";
 }
@@ -130,15 +127,11 @@ export async function checkSubscription(userId: string): Promise<boolean> {
     const data = subDoc.data();
     if (!data.isActive || !data.expiresAt) return false;
     return data.expiresAt.toDate() > new Date();
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 export async function getSubscriptionInfo(userId: string): Promise<{
-  isActive: boolean;
-  expiresAt: Date | null;
-  daysLeft: number;
+  isActive: boolean; expiresAt: Date | null; daysLeft: number;
 }> {
   try {
     if (userId === "unknown") return { isActive: false, expiresAt: null, daysLeft: 0 };
@@ -149,9 +142,7 @@ export async function getSubscriptionInfo(userId: string): Promise<{
     const expiresAt = data.expiresAt.toDate();
     const daysLeft = Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     return { isActive: daysLeft > 0, expiresAt, daysLeft };
-  } catch {
-    return { isActive: false, expiresAt: null, daysLeft: 0 };
-  }
+  } catch { return { isActive: false, expiresAt: null, daysLeft: 0 }; }
 }
 
 function normalizeTask(task: any): Task {
@@ -184,9 +175,7 @@ function loadTasks(): Task[] {
 
 function saveTasks(tasks: Task[]) {
   if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-  } catch {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); } catch {}
 }
 
 function loadCategories(): CustomCategory[] {
@@ -200,10 +189,8 @@ function loadCategories(): CustomCategory[] {
   ];
 }
 
-function saveCategories(categories: CustomCategory[]) {
-  try {
-    localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
-  } catch {}
+function saveCategories(cats: CustomCategory[]) {
+  try { localStorage.setItem(CATEGORIES_KEY, JSON.stringify(cats)); } catch {}
 }
 
 function loadCategoryEvents(): CategoryEvent[] {
@@ -214,10 +201,8 @@ function loadCategoryEvents(): CategoryEvent[] {
   return [];
 }
 
-function saveCategoryEvents(events: CategoryEvent[]) {
-  try {
-    localStorage.setItem(CATEGORY_EVENTS_KEY, JSON.stringify(events));
-  } catch {}
+function saveCategoryEventsLocal(events: CategoryEvent[]) {
+  try { localStorage.setItem(CATEGORY_EVENTS_KEY, JSON.stringify(events)); } catch {}
 }
 
 async function saveTaskToFirebase(task: Task, userId: string) {
@@ -225,27 +210,16 @@ async function saveTaskToFirebase(task: Task, userId: string) {
     let reminderAt = null;
     if (task.dueDate) {
       const date = new Date(task.dueDate);
-      if (!isNaN(date.getTime())) {
-        reminderAt = Timestamp.fromDate(date);
-      }
+      if (!isNaN(date.getTime())) reminderAt = Timestamp.fromDate(date);
     }
     await addDoc(collection(db, "tasks"), {
-      userId,
-      taskId: task.id,
-      title: task.title,
-      description: task.description || "",
-      dueDate: task.dueDate || null,
-      priority: task.priority,
-      status: task.status,
-      createdAt: task.createdAt,
-      isSent: false,
-      reminderAt,
-      repeat: task.repeat || "none",
-      category: task.category || "",
+      userId, taskId: task.id, title: task.title,
+      description: task.description || "", dueDate: task.dueDate || null,
+      priority: task.priority, status: task.status,
+      createdAt: task.createdAt, isSent: false, reminderAt,
+      repeat: task.repeat || "none", category: task.category || "",
     });
-  } catch (e: any) {
-    console.error("Firebase save error:", e.message);
-  }
+  } catch (e: any) { console.error("Firebase task save error:", e.message); }
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
@@ -255,6 +229,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   categories: loadCategories(),
   categoryEvents: loadCategoryEvents(),
   selectedDate: null,
+  isDataLoaded: false,
 
   addTask: async (task) => {
     const newTask: Task = {
@@ -265,13 +240,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       repeat: task.repeat || "none",
       category: task.category || "",
     };
-
     set((state) => {
       const updated = [newTask, ...state.tasks];
       saveTasks(updated);
       return { tasks: updated };
     });
-
     const userId = getTelegramUserId();
     saveTaskToFirebase(newTask, userId).catch(console.error);
   },
@@ -308,66 +281,36 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   addBirthday: async (birthday) => {
     const id = crypto.randomUUID();
     const newBirthday: Birthday = { ...birthday, id };
-
-    set((state) => ({
-      birthdays: [...state.birthdays, newBirthday],
-    }));
-
+    set((state) => ({ birthdays: [...state.birthdays, newBirthday] }));
     const userId = getTelegramUserId();
     if (userId !== "unknown") {
-      try {
-        await setDoc(doc(db, "users", userId, "birthdays", id), newBirthday);
-      } catch (e) {
-        console.error("Birthday save error:", e);
-      }
+      try { await setDoc(doc(db, "users", userId, "birthdays", id), newBirthday); } catch (e) { console.error(e); }
     }
   },
 
   deleteBirthday: async (id) => {
-    set((state) => ({
-      birthdays: state.birthdays.filter((b) => b.id !== id),
-    }));
-
+    set((state) => ({ birthdays: state.birthdays.filter((b) => b.id !== id) }));
     const userId = getTelegramUserId();
     if (userId !== "unknown") {
-      try {
-        await deleteDoc(doc(db, "users", userId, "birthdays", id));
-      } catch (e) {
-        console.error("Birthday delete error:", e);
-      }
+      try { await deleteDoc(doc(db, "users", userId, "birthdays", id)); } catch (e) { console.error(e); }
     }
   },
 
   addVacation: async (vacation) => {
     const id = crypto.randomUUID();
     const newVacation: Vacation = { ...vacation, id };
-
-    set((state) => ({
-      vacations: [...state.vacations, newVacation],
-    }));
-
+    set((state) => ({ vacations: [...state.vacations, newVacation] }));
     const userId = getTelegramUserId();
     if (userId !== "unknown") {
-      try {
-        await setDoc(doc(db, "users", userId, "vacations", id), newVacation);
-      } catch (e) {
-        console.error("Vacation save error:", e);
-      }
+      try { await setDoc(doc(db, "users", userId, "vacations", id), newVacation); } catch (e) { console.error(e); }
     }
   },
 
   deleteVacation: async (id) => {
-    set((state) => ({
-      vacations: state.vacations.filter((v) => v.id !== id),
-    }));
-
+    set((state) => ({ vacations: state.vacations.filter((v) => v.id !== id) }));
     const userId = getTelegramUserId();
     if (userId !== "unknown") {
-      try {
-        await deleteDoc(doc(db, "users", userId, "vacations", id));
-      } catch (e) {
-        console.error("Vacation delete error:", e);
-      }
+      try { await deleteDoc(doc(db, "users", userId, "vacations", id)); } catch (e) { console.error(e); }
     }
   },
 
@@ -383,55 +326,79 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   updateCategory: (id, updates) =>
     set((state) => {
-      const updated = state.categories.map((c) =>
-        c.id === id ? { ...c, ...updates } : c
-      );
+      const updated = state.categories.map((c) => c.id === id ? { ...c, ...updates } : c);
       saveCategories(updated);
       return { categories: updated };
     }),
 
   deleteCategory: (id) =>
     set((state) => {
-      const updated = state.categories.filter((c) => c.id !== id);
-      saveCategories(updated);
-      return { categories: updated };
+      const updatedCats = state.categories.filter((c) => c.id !== id);
+      const updatedEvents = state.categoryEvents.filter((e) => e.categoryId !== id);
+      saveCategories(updatedCats);
+      saveCategoryEventsLocal(updatedEvents);
+      return { categories: updatedCats, categoryEvents: updatedEvents };
     }),
 
-  addCategoryEvent: (event) => {
+  addCategoryEvent: async (event) => {
     const id = crypto.randomUUID();
     const newEvent: CategoryEvent = { ...event, id };
     set((state) => {
       const updated = [...state.categoryEvents, newEvent];
-      saveCategoryEvents(updated);
+      saveCategoryEventsLocal(updated);
       return { categoryEvents: updated };
     });
+    const userId = getTelegramUserId();
+    if (userId !== "unknown") {
+      try { await setDoc(doc(db, "users", userId, "categoryEvents", id), newEvent); } catch (e) { console.error(e); }
+    }
   },
 
-  deleteCategoryEvent: (id) =>
+  deleteCategoryEvent: async (id) => {
     set((state) => {
       const updated = state.categoryEvents.filter((e) => e.id !== id);
-      saveCategoryEvents(updated);
+      saveCategoryEventsLocal(updated);
       return { categoryEvents: updated };
-    }),
+    });
+    const userId = getTelegramUserId();
+    if (userId !== "unknown") {
+      try { await deleteDoc(doc(db, "users", userId, "categoryEvents", id)); } catch (e) { console.error(e); }
+    }
+  },
 
   loadUserData: async (userId) => {
-    if (userId === "unknown") return;
+    if (userId === "unknown") {
+      set({ isDataLoaded: true });
+      return;
+    }
     try {
-      const birthdaysSnap = await getDocs(
-        collection(db, "users", userId, "birthdays")
-      );
+      const [birthdaysSnap, vacationsSnap, categoryEventsSnap] = await Promise.all([
+        getDocs(collection(db, "users", userId, "birthdays")),
+        getDocs(collection(db, "users", userId, "vacations")),
+        getDocs(collection(db, "users", userId, "categoryEvents")),
+      ]);
+
       const birthdays: Birthday[] = [];
       birthdaysSnap.forEach((d) => birthdays.push(d.data() as Birthday));
 
-      const vacationsSnap = await getDocs(
-        collection(db, "users", userId, "vacations")
-      );
       const vacations: Vacation[] = [];
       vacationsSnap.forEach((d) => vacations.push(d.data() as Vacation));
 
-      set({ birthdays, vacations });
+      const categoryEvents: CategoryEvent[] = [];
+      categoryEventsSnap.forEach((d) => categoryEvents.push(d.data() as CategoryEvent));
+
+      // Merge with local
+      const localEvents = loadCategoryEvents();
+      const mergedEvents = [...categoryEvents];
+      localEvents.forEach((le) => {
+        if (!mergedEvents.find((e) => e.id === le.id)) mergedEvents.push(le);
+      });
+
+      saveCategoryEventsLocal(mergedEvents);
+      set({ birthdays, vacations, categoryEvents: mergedEvents, isDataLoaded: true });
     } catch (e) {
       console.error("Load user data error:", e);
+      set({ isDataLoaded: true });
     }
   },
 }));
@@ -441,15 +408,10 @@ export function usePersistTasks() {
     const stored = loadTasks();
     if (stored.length > 0) {
       const current = useTaskStore.getState().tasks;
-      if (current.length === 0) {
-        useTaskStore.setState({ tasks: stored });
-      }
+      if (current.length === 0) useTaskStore.setState({ tasks: stored });
     }
-
     const userId = getTelegramUserId();
-    if (userId !== "unknown") {
-      useTaskStore.getState().loadUserData(userId);
-    }
+    useTaskStore.getState().loadUserData(userId);
   }, []);
 }
 
@@ -467,6 +429,7 @@ export const RUSSIAN_HOLIDAYS: Record<string, string> = {
   "2026-03-09": "Международный женский день (перенос)",
   "2026-05-01": "Праздник Весны и Труда",
   "2026-05-04": "Праздник Весны и Труда (перенос)",
+  "2026-05-09": "День Победы",
   "2026-05-11": "День Победы (перенос)",
   "2026-06-12": "День России",
   "2026-11-04": "День народного единства",
@@ -482,6 +445,7 @@ export const RUSSIAN_HOLIDAYS: Record<string, string> = {
   "2027-02-22": "День защитника Отечества (перенос)",
   "2027-03-08": "Международный женский день",
   "2027-05-03": "Праздник Весны и Труда (перенос)",
+  "2027-05-09": "День Победы",
   "2027-05-10": "День Победы (перенос)",
   "2027-06-14": "День России (перенос)",
   "2027-11-04": "День народного единства",
@@ -490,7 +454,7 @@ export const RUSSIAN_HOLIDAYS: Record<string, string> = {
 };
 
 export function isWeekend(dateStr: string): boolean {
-  const date = new Date(dateStr);
+  const date = new Date(dateStr + "T12:00:00");
   const day = date.getDay();
   return day === 0 || day === 6;
 }
@@ -501,4 +465,8 @@ export function isHoliday(dateStr: string): boolean {
 
 export function getHolidayName(dateStr: string): string {
   return RUSSIAN_HOLIDAYS[dateStr] || "";
+}
+
+export function isRedDay(dateStr: string): boolean {
+  return isHoliday(dateStr) || isWeekend(dateStr);
 }
