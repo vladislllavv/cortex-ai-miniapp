@@ -12,6 +12,7 @@ const {
   doc,
   Timestamp,
   addDoc,
+  deleteDoc,
 } = require('firebase/firestore');
 
 const firebaseConfig = {
@@ -51,6 +52,8 @@ async function grantSubscription(userId, days = 30, isGift = false) {
     expiresAt: Timestamp.fromDate(expiresAt),
     updatedAt: Timestamp.fromDate(new Date()),
     isGift,
+    notified3days: false,
+    notified1day: false,
   });
 }
 
@@ -87,7 +90,12 @@ bot.onText(/\/gift (.+)/, async (msg, match) => {
   try {
     await grantSubscription(targetId, 3650, true);
     bot.sendMessage(msg.chat.id, `✅ Подписка выдана пользователю ${targetId}`);
-    try { bot.sendMessage(targetId, "🎁 Тебе выдана бесплатная подписка CortexAI!\n\n✅ Безлимитные задачи\n✅ AI ассистент"); } catch {}
+    try {
+      bot.sendMessage(targetId,
+        "🎁 Тебе выдана бесплатная подписка CortexAI!\n\n" +
+        "✅ Безлимитные задачи\n✅ AI ассистент без лимитов"
+      );
+    } catch {}
   } catch (err) {
     bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
   }
@@ -102,7 +110,8 @@ bot.onText(/\/revoke (.+)/, async (msg, match) => {
   const targetId = match[1].trim();
   try {
     await setDoc(doc(db, "subscriptions", String(targetId)), {
-      userId: String(targetId), isActive: false,
+      userId: String(targetId),
+      isActive: false,
       updatedAt: Timestamp.fromDate(new Date()),
     });
     bot.sendMessage(msg.chat.id, `✅ Подписка отключена у ${targetId}`);
@@ -119,9 +128,13 @@ bot.onText(/\/subscribe/, async (msg) => {
     return;
   }
   try {
-    await bot.sendInvoice(chatId, "Подписка CortexAI 🚀",
+    await bot.sendInvoice(
+      chatId,
+      "Подписка CortexAI 🚀",
       "Безлимитные задачи + AI ассистент на 30 дней",
-      `sub_${chatId}`, "", "XTR",
+      `sub_${chatId}`,
+      "",
+      "XTR",
       [{ label: "Подписка на 30 дней", amount: 100 }]
     );
   } catch (err) {
@@ -138,19 +151,97 @@ bot.on("successful_payment", async (msg) => {
   try {
     await grantSubscription(userId, 30, false);
     bot.sendMessage(msg.chat.id,
-      "✅ Подписка активирована!\n\n🚀 Доступны:\n• Безлимитные задачи\n• AI ассистент\n\nПодписка действует 30 дней."
+      "✅ Подписка активирована!\n\n" +
+      "🚀 Доступны:\n• Безлимитные задачи\n• AI ассистент без лимитов\n\n" +
+      "Подписка действует 30 дней."
     );
   } catch (err) {
     console.log("Ошибка активации подписки:", err.message);
   }
 });
 
-// Создать повторяющуюся задачу
+// ============ ПРОВЕРКА НАПОМИНАНИЙ ============
+
+async function checkReminders() {
+  try {
+    const now = new Date();
+    const q = query(
+      collection(db, "tasks"),
+      where("isSent", "==", false),
+      where("reminderAt", "<=", Timestamp.fromDate(now))
+    );
+    const snapshot = await getDocs(q);
+
+    for (const documentSnapshot of snapshot.docs) {
+      const task = documentSnapshot.data();
+
+      try {
+        // ✅ БЛОК 1: Проверяем статус задачи перед отправкой
+        // Если задача удалена или выполнена — пропускаем
+        if (task.status === "done") {
+          await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
+          console.log(`Задача выполнена — пропускаем: ${task.title}`);
+          continue;
+        }
+
+        await bot.sendMessage(
+          task.userId,
+          `🔔 Напоминание!\n\n📌 ${task.title}${task.description ? `\n${task.description}` : ""}${task.repeat === "daily" ? "\n\n🔁 Ежедневная задача" : ""}`
+        );
+
+        // Отмечаем как отправленное
+        await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
+
+        // Если ежедневная — создаём новую ТОЛЬКО если задача НЕ выполнена
+        if (task.repeat === "daily" && task.status !== "done") {
+          await createNextDailyTask(task);
+        }
+
+        console.log(`Уведомление отправлено: ${task.userId} — ${task.title}`);
+      } catch (err) {
+        console.log(`Ошибка отправки: ${err.message}`);
+        // Всё равно помечаем как отправленное чтобы не зацикливаться
+        try {
+          await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.log(`Ошибка проверки напоминаний: ${err.message}`);
+  }
+}
+
+// Создать повторяющуюся задачу на следующий день
 async function createNextDailyTask(task) {
   try {
+    // Проверяем что такой же задачи на завтра ещё нет
     const oldDate = task.reminderAt.toDate();
     const nextDate = new Date(oldDate);
     nextDate.setDate(nextDate.getDate() + 1);
+    const nextDateStr = nextDate.toISOString().split("T")[0];
+
+    const existingQuery = query(
+      collection(db, "tasks"),
+      where("userId", "==", task.userId),
+      where("title", "==", task.title),
+      where("repeat", "==", "daily")
+    );
+    const existing = await getDocs(existingQuery);
+
+    // Проверяем нет ли уже задачи на эту дату
+    let alreadyExists = false;
+    existing.forEach((d) => {
+      const data = d.data();
+      if (data.dueDate && data.dueDate.startsWith(nextDateStr) && !data.isSent) {
+        alreadyExists = true;
+      }
+    });
+
+    if (alreadyExists) {
+      console.log(`Повторяющаяся задача уже существует: ${task.title}`);
+      return;
+    }
+
     await addDoc(collection(db, "tasks"), {
       userId: task.userId,
       taskId: `daily_${Date.now()}`,
@@ -164,47 +255,18 @@ async function createNextDailyTask(task) {
       reminderAt: Timestamp.fromDate(nextDate),
       repeat: "daily",
     });
+
+    console.log(`Создана повторяющаяся задача: ${task.title} на ${nextDateStr}`);
   } catch (err) {
-    console.log("Ошибка создания повторяющейся задачи:", err.message);
+    console.log(`Ошибка создания повторяющейся задачи: ${err.message}`);
   }
 }
 
-// Проверка напоминаний
-async function checkReminders() {
-  try {
-    const now = new Date();
-    const q = query(
-      collection(db, "tasks"),
-      where("isSent", "==", false),
-      where("reminderAt", "<=", Timestamp.fromDate(now))
-    );
-    const snapshot = await getDocs(q);
+// ============ ПРОВЕРКА ПОДПИСОК ============
 
-    for (const documentSnapshot of snapshot.docs) {
-      const task = documentSnapshot.data();
-      try {
-        await bot.sendMessage(
-          task.userId,
-          `🔔 Напоминание!\n\n📌 ${task.title}${task.description ? `\n${task.description}` : ""}${task.repeat === "daily" ? "\n\n🔁 Ежедневная задача" : ""}`
-        );
-        await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
-        if (task.repeat === "daily") await createNextDailyTask(task);
-      } catch (err) {
-        console.log(`Ошибка отправки: ${err.message}`);
-      }
-    }
-  } catch (err) {
-    console.log(`Ошибка проверки: ${err.message}`);
-  }
-}
-
-// Проверка подписки (за 3 дня до окончания)
 async function checkSubscriptions() {
   try {
     const now = new Date();
-    const in3days = new Date(now);
-    in3days.setDate(in3days.getDate() + 3);
-
     const subsSnap = await getDocs(collection(db, "subscriptions"));
 
     for (const subDoc of subsSnap.docs) {
@@ -216,9 +278,10 @@ async function checkSubscriptions() {
 
       if (daysLeft === 3 && !sub.notified3days) {
         try {
-          await bot.sendMessage(
-            sub.userId,
-            `⚠️ Твоя подписка CortexAI заканчивается через 3 дня!\n\n📅 Дата окончания: ${expiresAt.toLocaleDateString("ru-RU")}\n\nНапиши /subscribe для продления 🚀`
+          await bot.sendMessage(sub.userId,
+            `⚠️ Подписка CortexAI заканчивается через 3 дня!\n\n` +
+            `📅 Дата окончания: ${expiresAt.toLocaleDateString("ru-RU")}\n\n` +
+            `Напиши /subscribe для продления 🚀`
           );
           await updateDoc(doc(db, "subscriptions", subDoc.id), { notified3days: true });
         } catch {}
@@ -226,11 +289,20 @@ async function checkSubscriptions() {
 
       if (daysLeft === 1 && !sub.notified1day) {
         try {
-          await bot.sendMessage(
-            sub.userId,
+          await bot.sendMessage(sub.userId,
             `🚨 Подписка CortexAI заканчивается ЗАВТРА!\n\nНапиши /subscribe для продления ⚡`
           );
           await updateDoc(doc(db, "subscriptions", subDoc.id), { notified1day: true });
+        } catch {}
+      }
+
+      // Деактивируем истёкшую подписку
+      if (daysLeft <= 0 && sub.isActive) {
+        try {
+          await updateDoc(doc(db, "subscriptions", subDoc.id), { isActive: false });
+          await bot.sendMessage(sub.userId,
+            `❌ Подписка CortexAI истекла.\n\nНапиши /subscribe для продления.`
+          );
         } catch {}
       }
     }
@@ -239,22 +311,17 @@ async function checkSubscriptions() {
   }
 }
 
-// Проверка дней рождения
+// ============ ПРОВЕРКА ДНЕЙ РОЖДЕНИЯ ============
+
 async function checkBirthdays() {
   try {
     const now = new Date();
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const tomorrowMonth = String(tomorrow.getMonth() + 1).padStart(2, "0");
-    const tomorrowDay = String(tomorrow.getDate()).padStart(2, "0");
-    const tomorrowStr = `${tomorrowMonth}-${tomorrowDay}`;
+    const tomorrowStr = `${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+    const todayStr = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
-    const todayMonth = String(now.getMonth() + 1).padStart(2, "0");
-    const todayDay = String(now.getDate()).padStart(2, "0");
-    const todayStr = `${todayMonth}-${todayDay}`;
-
-    // Получаем всех пользователей
     const usersSnap = await getDocs(collection(db, "users"));
 
     for (const userDoc of usersSnap.docs) {
@@ -264,17 +331,19 @@ async function checkBirthdays() {
       for (const bdDoc of birthdaysSnap.docs) {
         const bd = bdDoc.data();
 
-        // За день до ДР
         if (bd.date === tomorrowStr) {
           try {
-            await bot.sendMessage(userId, `🎂 Завтра день рождения у ${bd.name}!\n\nНе забудь поздравить! 🎉`);
+            await bot.sendMessage(userId,
+              `🎂 Завтра день рождения у ${bd.name}!\n\nНе забудь поздравить! 🎉`
+            );
           } catch {}
         }
 
-        // В день ДР
         if (bd.date === todayStr) {
           try {
-            await bot.sendMessage(userId, `🎉 Сегодня день рождения у ${bd.name}!\n\nПоздравь прямо сейчас! 🎂🥳`);
+            await bot.sendMessage(userId,
+              `🎉 Сегодня день рождения у ${bd.name}!\n\nПоздравь прямо сейчас! 🎂🥳`
+            );
           } catch {}
         }
       }
@@ -285,6 +354,6 @@ async function checkBirthdays() {
 }
 
 // Запуск проверок
-setInterval(checkReminders, 60 * 1000);           // каждую минуту
-setInterval(checkSubscriptions, 60 * 60 * 1000);   // каждый час
-setInterval(checkBirthdays, 60 * 60 * 1000);       // каждый час
+setInterval(checkReminders, 60 * 1000);
+setInterval(checkSubscriptions, 60 * 60 * 1000);
+setInterval(checkBirthdays, 60 * 60 * 1000);
