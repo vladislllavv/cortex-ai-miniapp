@@ -12,7 +12,6 @@ const {
   doc,
   Timestamp,
   addDoc,
-  deleteDoc,
 } = require('firebase/firestore');
 
 const firebaseConfig = {
@@ -57,6 +56,8 @@ async function grantSubscription(userId, days = 30, isGift = false) {
   });
 }
 
+// ============ КОМАНДЫ ============
+
 // /start
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
@@ -72,7 +73,10 @@ bot.onText(/\/start/, async (msg) => {
 
 // /myid
 bot.onText(/\/myid/, (msg) => {
-  bot.sendMessage(msg.chat.id, `Твой Telegram ID: \`${msg.chat.id}\``, { parse_mode: "Markdown" });
+  bot.sendMessage(msg.chat.id,
+    `Твой Telegram ID: \`${msg.chat.id}\``,
+    { parse_mode: "Markdown" }
+  );
 });
 
 // /appss_verify
@@ -80,7 +84,7 @@ bot.onText(/\/appss_verify/, (msg) => {
   bot.sendMessage(msg.chat.id, "appss_73be81");
 });
 
-// /gift
+// /gift — выдать подписку
 bot.onText(/\/gift (.+)/, async (msg, match) => {
   if (!isAdmin(String(msg.chat.id))) {
     bot.sendMessage(msg.chat.id, "❌ Нет прав.");
@@ -101,7 +105,7 @@ bot.onText(/\/gift (.+)/, async (msg, match) => {
   }
 });
 
-// /revoke
+// /revoke — отозвать подписку
 bot.onText(/\/revoke (.+)/, async (msg, match) => {
   if (!isAdmin(String(msg.chat.id))) {
     bot.sendMessage(msg.chat.id, "❌ Нет прав.");
@@ -115,12 +119,150 @@ bot.onText(/\/revoke (.+)/, async (msg, match) => {
       updatedAt: Timestamp.fromDate(new Date()),
     });
     bot.sendMessage(msg.chat.id, `✅ Подписка отключена у ${targetId}`);
+    try {
+      bot.sendMessage(targetId,
+        "❌ Твоя подписка CortexAI была отключена.\n\n" +
+        "Напиши /subscribe для оформления."
+      );
+    } catch {}
   } catch (err) {
     bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
   }
 });
 
-// /subscribe
+// /subscribers — список всех подписчиков
+bot.onText(/\/subscribers/, async (msg) => {
+  if (!isAdmin(String(msg.chat.id))) {
+    bot.sendMessage(msg.chat.id, "❌ Нет прав.");
+    return;
+  }
+
+  try {
+    const subsSnap = await getDocs(collection(db, "subscriptions"));
+    const now = new Date();
+
+    const activeList = [];
+    const expiredList = [];
+
+    subsSnap.forEach((subDoc) => {
+      const sub = subDoc.data();
+      if (!sub.expiresAt) return;
+
+      const expiresAt = sub.expiresAt.toDate();
+      const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
+
+      if (sub.isActive && daysLeft > 0) {
+        activeList.push({
+          userId: sub.userId,
+          daysLeft,
+          isGift: sub.isGift || false,
+          expiresAt: expiresAt.toLocaleDateString("ru-RU"),
+        });
+      } else {
+        expiredList.push({
+          userId: sub.userId,
+          expiresAt: expiresAt.toLocaleDateString("ru-RU"),
+        });
+      }
+    });
+
+    let response = `📊 Статистика подписок:\n\n`;
+    response += `✅ Активных: ${activeList.length}\n`;
+    response += `❌ Истёкших: ${expiredList.length}\n\n`;
+
+    if (activeList.length > 0) {
+      response += `━━━ АКТИВНЫЕ ━━━\n`;
+      activeList.forEach((s) => {
+        response += `👤 ${s.userId}\n`;
+        response += `   📅 До: ${s.expiresAt} (${s.daysLeft} дн.)\n`;
+        response += `   ${s.isGift ? "🎁 Подарочная" : "💳 Платная"}\n\n`;
+      });
+    }
+
+    if (expiredList.length > 0) {
+      response += `━━━ ИСТЁКШИЕ (последние 10) ━━━\n`;
+      expiredList.slice(0, 10).forEach((s) => {
+        response += `👤 ${s.userId} — ${s.expiresAt}\n`;
+      });
+    }
+
+    if (activeList.length === 0 && expiredList.length === 0) {
+      response += "Подписчиков пока нет.";
+    }
+
+    bot.sendMessage(msg.chat.id, response);
+  } catch (err) {
+    bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
+  }
+});
+
+// /stats — статистика приложения
+bot.onText(/\/stats/, async (msg) => {
+  if (!isAdmin(String(msg.chat.id))) {
+    bot.sendMessage(msg.chat.id, "❌ Нет прав.");
+    return;
+  }
+
+  try {
+    const [subsSnap, tasksSnap] = await Promise.all([
+      getDocs(collection(db, "subscriptions")),
+      getDocs(collection(db, "tasks")),
+    ]);
+
+    const now = new Date();
+    let activeSubs = 0;
+    let totalSubs = 0;
+    let giftSubs = 0;
+    let paidSubs = 0;
+
+    subsSnap.forEach((subDoc) => {
+      const sub = subDoc.data();
+      totalSubs++;
+      if (sub.isActive && sub.expiresAt) {
+        const daysLeft = Math.ceil((sub.expiresAt.toDate() - now) / (1000 * 60 * 60 * 24));
+        if (daysLeft > 0) {
+          activeSubs++;
+          if (sub.isGift) giftSubs++;
+          else paidSubs++;
+        }
+      }
+    });
+
+    const totalTasks = tasksSnap.size;
+
+    const response =
+      `📈 Статистика CortexAI:\n\n` +
+      `👥 Всего пользователей: ${totalSubs}\n` +
+      `✅ Активных подписок: ${activeSubs}\n` +
+      `   🎁 Подарочных: ${giftSubs}\n` +
+      `   💳 Платных: ${paidSubs}\n\n` +
+      `📋 Всего задач в системе: ${totalTasks}\n`;
+
+    bot.sendMessage(msg.chat.id, response);
+  } catch (err) {
+    bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
+  }
+});
+
+// /help — помощь для админа
+bot.onText(/\/help/, (msg) => {
+  if (!isAdmin(String(msg.chat.id))) return;
+
+  bot.sendMessage(msg.chat.id,
+    `🛠 Команды администратора:\n\n` +
+    `/gift [ID] — выдать подписку\n` +
+    `/revoke [ID] — отозвать подписку\n` +
+    `/subscribers — список подписчиков\n` +
+    `/stats — статистика приложения\n` +
+    `/myid — узнать свой ID\n\n` +
+    `Команды для пользователей:\n` +
+    `/start — запустить бота\n` +
+    `/subscribe — купить подписку\n` +
+    `/myid — узнать свой ID`
+  );
+});
+
+// /subscribe — купить подписку
 bot.onText(/\/subscribe/, async (msg) => {
   const chatId = msg.chat.id;
   if (isAdmin(String(chatId))) {
@@ -142,10 +284,12 @@ bot.onText(/\/subscribe/, async (msg) => {
   }
 });
 
+// Подтверждение оплаты
 bot.on("pre_checkout_query", (query) => {
   bot.answerPreCheckoutQuery(query.id, true);
 });
 
+// Успешная оплата
 bot.on("successful_payment", async (msg) => {
   const userId = String(msg.chat.id);
   try {
@@ -176,8 +320,7 @@ async function checkReminders() {
       const task = documentSnapshot.data();
 
       try {
-        // ✅ БЛОК 1: Проверяем статус задачи перед отправкой
-        // Если задача удалена или выполнена — пропускаем
+        // Если задача выполнена — не отправляем
         if (task.status === "done") {
           await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
           console.log(`Задача выполнена — пропускаем: ${task.title}`);
@@ -189,18 +332,16 @@ async function checkReminders() {
           `🔔 Напоминание!\n\n📌 ${task.title}${task.description ? `\n${task.description}` : ""}${task.repeat === "daily" ? "\n\n🔁 Ежедневная задача" : ""}`
         );
 
-        // Отмечаем как отправленное
         await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
 
-        // Если ежедневная — создаём новую ТОЛЬКО если задача НЕ выполнена
+        // Ежедневная задача — создаём на завтра
         if (task.repeat === "daily" && task.status !== "done") {
           await createNextDailyTask(task);
         }
 
-        console.log(`Уведомление отправлено: ${task.userId} — ${task.title}`);
+        console.log(`✅ Уведомление: ${task.userId} — ${task.title}`);
       } catch (err) {
-        console.log(`Ошибка отправки: ${err.message}`);
-        // Всё равно помечаем как отправленное чтобы не зацикливаться
+        console.log(`❌ Ошибка отправки: ${err.message}`);
         try {
           await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
         } catch {}
@@ -214,31 +355,31 @@ async function checkReminders() {
 // Создать повторяющуюся задачу на следующий день
 async function createNextDailyTask(task) {
   try {
-    // Проверяем что такой же задачи на завтра ещё нет
     const oldDate = task.reminderAt.toDate();
     const nextDate = new Date(oldDate);
     nextDate.setDate(nextDate.getDate() + 1);
     const nextDateStr = nextDate.toISOString().split("T")[0];
 
+    // Проверяем что такой задачи на завтра ещё нет
     const existingQuery = query(
       collection(db, "tasks"),
       where("userId", "==", task.userId),
       where("title", "==", task.title),
-      where("repeat", "==", "daily")
+      where("repeat", "==", "daily"),
+      where("isSent", "==", false)
     );
     const existing = await getDocs(existingQuery);
 
-    // Проверяем нет ли уже задачи на эту дату
     let alreadyExists = false;
     existing.forEach((d) => {
       const data = d.data();
-      if (data.dueDate && data.dueDate.startsWith(nextDateStr) && !data.isSent) {
+      if (data.dueDate && data.dueDate.startsWith(nextDateStr)) {
         alreadyExists = true;
       }
     });
 
     if (alreadyExists) {
-      console.log(`Повторяющаяся задача уже существует: ${task.title}`);
+      console.log(`Повторяющаяся задача уже есть: ${task.title}`);
       return;
     }
 
@@ -256,7 +397,7 @@ async function createNextDailyTask(task) {
       repeat: "daily",
     });
 
-    console.log(`Создана повторяющаяся задача: ${task.title} на ${nextDateStr}`);
+    console.log(`🔁 Создана повторяющаяся задача: ${task.title} на ${nextDateStr}`);
   } catch (err) {
     console.log(`Ошибка создания повторяющейся задачи: ${err.message}`);
   }
@@ -276,6 +417,7 @@ async function checkSubscriptions() {
       const expiresAt = sub.expiresAt.toDate();
       const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
 
+      // За 3 дня
       if (daysLeft === 3 && !sub.notified3days) {
         try {
           await bot.sendMessage(sub.userId,
@@ -287,6 +429,7 @@ async function checkSubscriptions() {
         } catch {}
       }
 
+      // За 1 день
       if (daysLeft === 1 && !sub.notified1day) {
         try {
           await bot.sendMessage(sub.userId,
@@ -296,7 +439,7 @@ async function checkSubscriptions() {
         } catch {}
       }
 
-      // Деактивируем истёкшую подписку
+      // Истекла
       if (daysLeft <= 0 && sub.isActive) {
         try {
           await updateDoc(doc(db, "subscriptions", subDoc.id), { isActive: false });
@@ -326,7 +469,9 @@ async function checkBirthdays() {
 
     for (const userDoc of usersSnap.docs) {
       const userId = userDoc.id;
-      const birthdaysSnap = await getDocs(collection(db, "users", userId, "birthdays"));
+      const birthdaysSnap = await getDocs(
+        collection(db, "users", userId, "birthdays")
+      );
 
       for (const bdDoc of birthdaysSnap.docs) {
         const bd = bdDoc.data();
@@ -353,7 +498,8 @@ async function checkBirthdays() {
   }
 }
 
-// Запуск проверок
-setInterval(checkReminders, 60 * 1000);
-setInterval(checkSubscriptions, 60 * 60 * 1000);
-setInterval(checkBirthdays, 60 * 60 * 1000);
+// ============ ЗАПУСК ПРОВЕРОК ============
+
+setInterval(checkReminders, 60 * 1000);          // каждую минуту
+setInterval(checkSubscriptions, 60 * 60 * 1000); // каждый час
+setInterval(checkBirthdays, 60 * 60 * 1000);     // каждый час
