@@ -9,7 +9,7 @@ import {
 import { useI18nStore } from "@/lib/i18n";
 import { Send, Bot, Loader2 } from "lucide-react";
 
-const OPENROUTER_API_KEY = "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";
+const OPENROUTER_API_KEY = "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";
 const MODEL = "meta-llama/llama-3.3-70b-instruct:free";
 
 interface Message {
@@ -101,9 +101,7 @@ export default function AiProcessPage() {
   const tasksSummary =
     activeTasks.length > 0
       ? activeTasks.map((t) => `- ${t.title} (${t.priority})`).join("\n")
-      : ru
-      ? "Задач пока нет"
-      : "No tasks yet";
+      : ru ? "Задач пока нет" : "No tasks yet";
 
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = loadChatHistory();
@@ -144,18 +142,8 @@ export default function AiProcessPage() {
   };
 
   const quickQuestions = ru
-    ? [
-        "через 1 час позвонить",
-        "оптимизируй задачи",
-        "как снизить стресс?",
-        "с чего начать?",
-      ]
-    : [
-        "call in 1 hour",
-        "optimize tasks",
-        "reduce stress?",
-        "where to start?",
-      ];
+    ? ["через 1 час позвонить", "оптимизируй задачи", "как снизить стресс?", "с чего начать?"]
+    : ["call in 1 hour", "optimize tasks", "reduce stress?", "where to start?"];
 
   const sendMessage = async (text?: string) => {
     const messageText = (text || input).trim();
@@ -260,27 +248,12 @@ export default function AiProcessPage() {
           <Bot size={22} color="#3b82f6" />
         </div>
         <div style={{ flex: 1 }}>
-          <p
-            style={{
-              fontSize: "17px",
-              fontWeight: 700,
-              color: "white",
-              margin: 0,
-            }}
-          >
+          <p style={{ fontSize: "17px", fontWeight: 700, color: "white", margin: 0 }}>
             AI {ru ? "Ассистент" : "Assistant"}
           </p>
-          <p
-            style={{
-              fontSize: "12px",
-              color: "rgba(255,255,255,0.4)",
-              margin: 0,
-            }}
-          >
+          <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
             {hasSubscription
-              ? ru
-                ? "Подписка активна ✅"
-                : "Subscription active ✅"
+              ? ru ? "Подписка активна ✅" : "Subscription active ✅"
               : ru
               ? `${AI_FREE_LIMIT - aiUsageCount} запросов осталось`
               : `${AI_FREE_LIMIT - aiUsageCount} requests left`}
@@ -367,27 +340,15 @@ export default function AiProcessPage() {
               style={{
                 maxWidth: "85%",
                 padding: "10px 14px",
-                borderRadius:
-                  msg.role === "user"
-                    ? "16px 16px 4px 16px"
-                    : "16px 16px 16px 4px",
-                backgroundColor:
-                  msg.role === "user"
-                    ? "#3b82f6"
-                    : "rgba(255,255,255,0.07)",
-                border:
-                  msg.role === "assistant"
-                    ? "1px solid rgba(255,255,255,0.08)"
-                    : "none",
+                borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                backgroundColor: msg.role === "user" ? "#3b82f6" : "rgba(255,255,255,0.07)",
+                border: msg.role === "assistant" ? "1px solid rgba(255,255,255,0.08)" : "none",
               }}
             >
               <p
                 style={{
                   fontSize: "14px",
-                  color:
-                    msg.role === "user"
-                      ? "white"
-                      : "rgba(255,255,255,0.9)",
+                  color: msg.role === "user" ? "white" : "rgba(255,255,255,0.9)",
                   margin: 0,
                   lineHeight: "1.5",
                   whiteSpace: "pre-wrap",
@@ -418,12 +379,7 @@ export default function AiProcessPage() {
                 color="rgba(255,255,255,0.5)"
                 style={{ animation: "spin 1s linear infinite" }}
               />
-              <span
-                style={{
-                  fontSize: "13px",
-                  color: "rgba(255,255,255,0.5)",
-                }}
-              >
+              <span style={{ fontSize: "13px", color: "rgba(255,255,255,0.5)" }}>
                 {ru ? "Думаю..." : "Thinking..."}
               </span>
             </div>
@@ -455,20 +411,14 @@ export default function AiProcessPage() {
           }}
           placeholder={
             isLimited
-              ? ru
-                ? "Лимит исчерпан..."
-                : "Limit reached..."
-              : ru
-              ? "Напиши задачу или вопрос..."
-              : "Write a task or question..."
+              ? ru ? "Лимит исчерпан..." : "Limit reached..."
+              : ru ? "Напиши задачу или вопрос..." : "Write a task or question..."
           }
           disabled={isLimited}
           rows={1}
           style={{
             flex: 1,
-            backgroundColor: isLimited
-              ? "rgba(255,255,255,0.03)"
-              : "rgba(255,255,255,0.07)",
+            backgroundColor: isLimited ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.07)",
             border: "1px solid rgba(255,255,255,0.1)",
             borderRadius: "14px",
             padding: "10px 12px",
@@ -490,15 +440,9 @@ export default function AiProcessPage() {
             height: "42px",
             minWidth: "42px",
             borderRadius: "50%",
-            backgroundColor:
-              input.trim() && !loading && !isLimited
-                ? "#3b82f6"
-                : "rgba(255,255,255,0.08)",
+            backgroundColor: input.trim() && !loading && !isLimited ? "#3b82f6" : "rgba(255,255,255,0.08)",
             border: "none",
-            cursor:
-              input.trim() && !loading && !isLimited
-                ? "pointer"
-                : "default",
+            cursor: input.trim() && !loading && !isLimited ? "pointer" : "default",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
