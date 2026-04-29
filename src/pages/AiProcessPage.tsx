@@ -13,6 +13,7 @@ import { useI18nStore } from "@/lib/i18n";
 import { Send, Bot, Mic, MicOff, Copy, Check } from "lucide-react";
 
 const ASSISTANT_NAME_KEY = "cortex-assistant-name";
+const AI_FREE_LIMIT = 5;
 
 function getAssistantName(): string {
   return localStorage.getItem(ASSISTANT_NAME_KEY) || "CortexAI";
@@ -110,12 +111,20 @@ function detectPriority(inputText: string): "low" | "medium" | "high" {
 
 function isTaskCreationIntent(inputText: string): boolean {
   const lower = inputText.toLowerCase();
-  return ["напомни", "напоминание", "создай задачу", "нужно", "надо", "поставь", "запланируй", "встреча", "совещание", "созвон", "позвонить", "купить", "сделать", "отправить", "написать", "зайти", "remind", "todo", "need to", "meeting"].some((k) => lower.includes(k));
+  return [
+    "напомни", "напоминание", "создай задачу", "нужно", "надо",
+    "поставь", "запланируй", "встреча", "совещание", "созвон",
+    "позвонить", "купить", "сделать", "отправить", "написать",
+    "зайти", "remind", "todo", "need to", "meeting",
+  ].some((k) => lower.includes(k));
 }
 
 function extractTaskTitle(inputText: string): string {
   let title = inputText;
-  const prefixes = ["напомни мне", "напомни", "создай задачу", "нужно", "надо", "поставь", "запланируй", "remind me to", "add task", "i need to"];
+  const prefixes = [
+    "напомни мне", "напомни", "создай задачу", "нужно", "надо",
+    "поставь", "запланируй", "remind me to", "add task", "i need to",
+  ];
   const lower = title.toLowerCase();
   for (const prefix of prefixes) {
     if (lower.startsWith(prefix)) { title = title.slice(prefix.length).trim(); break; }
@@ -130,11 +139,34 @@ function extractTaskTitle(inputText: string): string {
   return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
+// Проверяем — это ответ на вопрос "за сколько напомнить?"
+function parseReminderAdvance(inputText: string): number | null {
+  const lower = inputText.toLowerCase();
+
+  if (lower.includes("без напомин") || lower.includes("no reminder") || lower.includes("не надо")) return 0;
+
+  const minMatch = lower.match(/за\s+(\d+)\s*мин/);
+  if (minMatch) return parseInt(minMatch[1]);
+
+  const hourMatch = lower.match(/за\s+(\d+)\s*час/);
+  if (hourMatch) return parseInt(hourMatch[1]) * 60;
+
+  if (lower.includes("за день") || lower.includes("за сутки")) return 24 * 60;
+  if (lower.includes("за час")) return 60;
+  if (lower.includes("за полчаса") || lower.includes("за 30")) return 30;
+  if (lower.includes("за 15")) return 15;
+  if (lower.includes("за 10")) return 10;
+  if (lower.includes("за 5")) return 5;
+
+  return null;
+}
+
 interface AIResult {
   responseText: string;
   task: { title: string; dueDate?: string; priority: string } | null;
   needsTime?: boolean;
   pendingTitle?: string;
+  needsAdvance?: boolean;
 }
 
 function generateAIResponse(
@@ -143,7 +175,8 @@ function generateAIResponse(
   language: string,
   birthdays: any[],
   assistantName: string,
-  pendingTask?: { title: string }
+  pendingTask?: { title: string; dueDate?: string } | null,
+  waitingAdvance?: boolean
 ): AIResult {
   const ru = language === "ru";
   const lower = userText.toLowerCase();
@@ -151,15 +184,40 @@ function generateAIResponse(
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
 
-  if (pendingTask) {
-    const dueDate = parseTimeFromText(userText);
-    if (dueDate) {
-      const timeStr = dueDate.toLocaleString(ru ? "ru-RU" : "en-US", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
+  // Ждём ответ на "за сколько напомнить?"
+  if (waitingAdvance && pendingTask?.dueDate) {
+    const advance = parseReminderAdvance(userText);
+    if (advance !== null) {
       return {
         responseText: ru
-          ? `✅ Отлично! ${assistantName} поставила напоминание.\n\n📌 ${pendingTask.title}\n⏰ ${timeStr}\n\nЗадача добавлена в список!`
-          : `✅ Done! ${assistantName} set a reminder.\n\n📌 ${pendingTask.title}\n⏰ ${timeStr}\n\nTask added to list!`,
-        task: { title: pendingTask.title, dueDate: dueDate.toISOString(), priority: detectPriority(userText) },
+          ? `✅ Готово! Задача создана и напоминание установлено.\n\n📌 ${pendingTask.title}${advance > 0 ? `\n⏰ Напомню за ${advance} мин до события` : ""}`
+          : `✅ Done! Task created with reminder.\n\n📌 ${pendingTask.title}${advance > 0 ? `\n⏰ Will remind ${advance} min before` : ""}`,
+        task: { title: pendingTask.title, dueDate: pendingTask.dueDate, priority: "medium" },
+      };
+    }
+    // Не понял ответ — всё равно создаём задачу
+    return {
+      responseText: ru
+        ? `✅ Задача создана!\n\n📌 ${pendingTask.title}`
+        : `✅ Task created!\n\n📌 ${pendingTask.title}`,
+      task: { title: pendingTask.title, dueDate: pendingTask.dueDate, priority: "medium" },
+    };
+  }
+
+  // Ждём время для задачи
+  if (pendingTask && !pendingTask.dueDate) {
+    const dueDate = parseTimeFromText(userText);
+    if (dueDate) {
+      const timeStr = dueDate.toLocaleString(ru ? "ru-RU" : "en-US", {
+        hour: "2-digit", minute: "2-digit", day: "numeric", month: "short",
+      });
+      return {
+        responseText: ru
+          ? `✅ ${assistantName} поставила напоминание.\n\n📌 ${pendingTask.title}\n⏰ ${timeStr}\n\nЗа сколько напомнить заранее? (за 15 мин, за час, без напоминания)`
+          : `✅ ${assistantName} set a reminder.\n\n📌 ${pendingTask.title}\n⏰ ${timeStr}\n\nHow early to remind? (15 min before, 1 hour, no reminder)`,
+        task: null,
+        needsAdvance: true,
+        pendingTitle: pendingTask.title,
       };
     }
     return {
@@ -170,7 +228,12 @@ function generateAIResponse(
     };
   }
 
-  if (lower.includes("что у меня") || lower.includes("какие задачи") || lower.includes("на сегодня") || lower.includes("что сегодня") || lower.includes("today tasks") || lower.includes("what do i have")) {
+  // "Что у меня сегодня?"
+  if (
+    lower.includes("что у меня") || lower.includes("какие задачи") ||
+    lower.includes("на сегодня") || lower.includes("что сегодня") ||
+    lower.includes("today tasks") || lower.includes("what do i have")
+  ) {
     const todayTasks = tasks.filter((t) => t.dueDate?.startsWith(todayStr));
     const holidayToday = isHoliday(todayStr);
     const weekendToday = isWeekend(todayStr);
@@ -184,20 +247,25 @@ function generateAIResponse(
 
     if (holidayToday) response += `🎉 ${getHolidayName(todayStr)}\n\n`;
     if (weekendToday && !holidayToday) response += `🏖️ ${ru ? "Выходной день" : "Weekend"}\n\n`;
-    if (todayBirthdays.length > 0) response += `🎂 ${ru ? "День рождения" : "Birthday"}: ${todayBirthdays.map((b: any) => b.name).join(", ")}\n\n`;
+    if (todayBirthdays.length > 0) {
+      response += `🎂 ${ru ? "День рождения" : "Birthday"}: ${todayBirthdays.map((b: any) => b.name).join(", ")}\n\n`;
+    }
 
     if (todayTasks.length === 0) {
       response += ru ? "✅ Задач на сегодня нет!" : "✅ No tasks today!";
     } else {
       response += ru ? `📋 Задачи (${todayTasks.length}):\n` : `📋 Tasks (${todayTasks.length}):\n`;
       todayTasks.forEach((t, i) => {
-        const time = t.dueDate ? new Date(t.dueDate).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "";
+        const time = t.dueDate
+          ? new Date(t.dueDate).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+          : "";
         response += `${i + 1}. ${t.status === "done" ? "✅" : "⬜"} ${t.title}${time ? ` — ${time}` : ""}\n`;
       });
     }
     return { responseText: response, task: null };
   }
 
+  // Создание задачи
   if (isTaskCreationIntent(userText)) {
     const dueDate = parseTimeFromText(userText);
     const title = extractTaskTitle(userText);
@@ -205,23 +273,30 @@ function generateAIResponse(
 
     if (title.length > 2) {
       if (dueDate) {
-        const timeStr = dueDate.toLocaleString(ru ? "ru-RU" : "en-US", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" });
+        const timeStr = dueDate.toLocaleString(ru ? "ru-RU" : "en-US", {
+          hour: "2-digit", minute: "2-digit", day: "numeric", month: "short",
+        });
         return {
           responseText: ru
-            ? `✅ Хорошо, ${assistantName} поставила напоминание.\n\n📌 ${title}\n⏰ ${timeStr}\n\nЗа сколько напомнить заранее? Или "без напоминания".`
-            : `✅ Done, ${assistantName} set a reminder.\n\n📌 ${title}\n⏰ ${timeStr}\n\nHow early to remind? Or "no reminder".`,
-          task: { title, dueDate: dueDate.toISOString(), priority },
+            ? `✅ Хорошо, ${assistantName} поставила напоминание.\n\n📌 ${title}\n⏰ ${timeStr}\n\nЗа сколько напомнить заранее? (за 15 мин, за час, без напоминания)`
+            : `✅ Done, ${assistantName} set reminder.\n\n📌 ${title}\n⏰ ${timeStr}\n\nHow early to remind? (15 min, 1 hour, no reminder)`,
+          task: null,
+          needsAdvance: true,
+          pendingTitle: title,
         };
       }
+
+      // Нет времени — обязательно запрашиваем
       return {
         responseText: ru
-          ? `📌 Понял: "${title}"\n\nКогда напомнить? Напиши время:\n"завтра в 10:00" или "через 2 часа"`
-          : `📌 Got it: "${title}"\n\nWhen to remind? Write time:\n"tomorrow at 10:00" or "in 2 hours"`,
+          ? `📌 Понял: "${title}"\n\n⚠️ Задачи создаются только с указанием даты и времени.\n\nКогда напомнить?\n"завтра в 10:00" или "через 2 часа"`
+          : `📌 Got it: "${title}"\n\n⚠️ Tasks require date and time.\n\nWhen to remind?\n"tomorrow at 10:00" or "in 2 hours"`,
         task: null, needsTime: true, pendingTitle: title,
       };
     }
   }
 
+  // Анализ задач
   if (lower.includes("оптимиз") || lower.includes("optimize")) {
     if (activeTasks.length === 0) return { responseText: ru ? "Нет активных задач! 🎉" : "No active tasks! 🎉", task: null };
     const high = activeTasks.filter((t) => t.priority === "high");
@@ -233,24 +308,35 @@ function generateAIResponse(
     };
   }
 
+  // С чего начать
   if (lower.includes("начать") || lower.includes("start") || lower.includes("с чего")) {
     if (activeTasks.length === 0) return { responseText: ru ? "Список пуст! 🎉" : "List is empty! 🎉", task: null };
     const first = activeTasks.find((t) => t.priority === "high") || activeTasks[0];
     return {
       responseText: ru
-        ? `🚀 Начни с:\n\n📌 "${first.title}"\n\n✨ Правило 2 минут: меньше 2 мин — делай сейчас!\n\n💪 Ты справишься!`
-        : `🚀 Start with:\n\n📌 "${first.title}"\n\n✨ 2-min rule: less than 2 min — do it now!\n\n💪 You got this!`,
+        ? `🚀 Начни с:\n\n📌 "${first.title}"\n\n✨ Правило 2 минут!\n\n💪 Ты справишься!`
+        : `🚀 Start with:\n\n📌 "${first.title}"\n\n✨ 2-min rule!\n\n💪 You got this!`,
       task: null,
     };
   }
 
+  // Стресс
   if (lower.includes("стресс") || lower.includes("stress") || lower.includes("устал") || lower.includes("тревог")) {
     const tips = ru
-      ? ["🧘 Техника 4-7-8:\n\nВдох 4 сек → задержка 7 сек → выдох 8 сек.\n\nПовтори 3 раза. Снижает тревогу! ✨", "🌿 5-4-3-2-1:\n\n• 5 вещей видишь\n• 4 трогаешь\n• 3 слышишь\n• 2 чувствуешь\n• 1 на вкус\n\nВозвращает в настоящее 🙏", "💆 Раздели задачу на 3 шага.\n\nПервый шаг — 5 минут. Начни! 🚀"]
-      : ["🧘 4-7-8: Inhale 4s → Hold 7s → Exhale 8s. Repeat 3x ✨", "🌿 5-4-3-2-1: 5 see, 4 touch, 3 hear, 2 smell, 1 taste 🙏", "💆 Break task into 3 steps. First = 5 min. Go! 🚀"];
+      ? [
+          "🧘 Техника 4-7-8:\n\nВдох 4 сек → задержка 7 сек → выдох 8 сек.\n\nПовтори 3 раза. Снижает тревогу! ✨",
+          "🌿 Метод 5-4-3-2-1:\n\n• 5 вещей видишь\n• 4 трогаешь\n• 3 слышишь\n• 2 чувствуешь\n• 1 на вкус\n\nВозвращает в настоящее 🙏",
+          "💆 Раздели задачу на 3 шага.\n\nПервый шаг — 5 минут. Начни! 🚀",
+        ]
+      : [
+          "🧘 4-7-8: Inhale 4s → Hold 7s → Exhale 8s. Repeat 3x ✨",
+          "🌿 5-4-3-2-1: 5 see, 4 touch, 3 hear, 2 smell, 1 taste 🙏",
+          "💆 Break task into 3 steps. First = 5 min. Go! 🚀",
+        ];
     return { responseText: tips[Math.floor(Math.random() * tips.length)], task: null };
   }
 
+  // Мотивация
   if (lower.includes("мотив") || lower.includes("лень") || lower.includes("motivat")) {
     return {
       responseText: ru
@@ -260,52 +346,78 @@ function generateAIResponse(
     };
   }
 
+  // Продуктивность
   if (lower.includes("продуктив") || lower.includes("эффектив") || lower.includes("productive")) {
     return {
       responseText: ru
         ? "⚡ Помодоро:\n\n• 25 мин работы\n• 5 мин отдыха\n• 4 цикла → 30 мин\n\n+40% к продуктивности! 🎯"
-        : "⚡ Pomodoro:\n\n• 25 min work\n• 5 min rest\n• 4 cycles → 30 min break\n\n+40% productivity! 🎯",
+        : "⚡ Pomodoro:\n\n• 25 min work\n• 5 min rest\n• 4 cycles → 30 min\n\n+40% productivity! 🎯",
       task: null,
     };
   }
 
+  // Статистика
   if (lower.includes("сколько") || lower.includes("статистик") || lower.includes("how many")) {
     const done = tasks.filter((t) => t.status === "done").length;
     return {
       responseText: ru
-        ? `📊 Статистика:\n\n✅ Выполнено: ${done}\n📋 Активных: ${activeTasks.length}\n📁 Всего: ${tasks.length}`
+        ? `📊 Статистика:\n\n✅ Выполнено: ${done}\n📋 Активных: ${activeTasks.length}\n📁 Всего: ${tasks.length}\n\n${done > 0 ? `🎉 Уже выполнено ${done}!` : "💪 Начинай!"}`
         : `📊 Stats:\n\n✅ Done: ${done}\n📋 Active: ${activeTasks.length}\n📁 Total: ${tasks.length}`,
       task: null,
     };
   }
 
+  // Имя ассистента
   if (lower.includes("как тебя зовут") || lower.includes("твоё имя") || lower.includes("your name") || lower.includes("who are you")) {
     return {
-      responseText: ru ? `Меня зовут ${assistantName}! 😊 Я твой личный AI ассистент-планировщик.` : `My name is ${assistantName}! 😊 I'm your personal AI planning assistant.`,
+      responseText: ru
+        ? `Меня зовут ${assistantName}! 😊 Я твой личный AI ассистент-планировщик.`
+        : `My name is ${assistantName}! 😊 I'm your personal AI planning assistant.`,
       task: null,
     };
   }
 
+  // Привет
   if (lower.includes("привет") || lower.includes("hello") || lower.includes("hi")) {
     return {
       responseText: ru
-        ? `Привет! 👋 Я ${assistantName}.\n\nПопробуй:\n• "завтра в 12 совещание"\n• "что у меня сегодня?"\n• "я в стрессе"`
-        : `Hello! 👋 I'm ${assistantName}.\n\nTry:\n• "meeting tomorrow at 12"\n• "what do I have today?"\n• "I'm stressed"`,
+        ? `Привет! 👋 Я ${assistantName}.\n\nПопробуй:\n• "завтра в 12 совещание"\n• "что у меня сегодня?"\n• "я в стрессе"\n• 🎤 Нажми микрофон`
+        : `Hello! 👋 I'm ${assistantName}.\n\nTry:\n• "meeting tomorrow at 12"\n• "what do I have today?"\n• "I'm stressed"\n• 🎤 Tap mic`,
       task: null,
     };
   }
 
+  // Помощь
+  if (lower.includes("помог") || lower.includes("help") || lower.includes("умеешь")) {
+    return {
+      responseText: ru
+        ? `🤖 ${assistantName} умеет:\n\n📌 Создавать задачи:\n"завтра в 10 встреча"\n"через 30 мин позвонить"\n\n📅 Показывать план:\n"что у меня сегодня?"\n\n📊 Анализировать:\n"оптимизируй задачи"\n\n🧘 Помогать:\n"я в стрессе"\n\n⚠️ Задачи создаются только с датой и временем!`
+        : `🤖 ${assistantName} can:\n\n📌 Create tasks:\n"meeting tomorrow at 10"\n"call in 30 min"\n\n📅 Show plan:\n"what do I have today?"\n\n📊 Analyze:\n"optimize tasks"\n\n🧘 Help:\n"I'm stressed"\n\n⚠️ Tasks require date and time!`,
+      task: null,
+    };
+  }
+
+  // Дефолт
   const defaults = ru
-    ? [`Попробуй написать задачу с временем:\n"завтра в 14:00 встреча" 📌`, `Могу показать задачи — напиши "что у меня сегодня?" 📅`, `Напиши задачу и время — ${assistantName} поставит напоминание! ⏰`]
-    : [`Try a task with time:\n"meeting tomorrow at 14:00" 📌`, `Show tasks — write "what do I have today?" 📅`, `Write task and time — ${assistantName} will set reminder! ⏰`];
+    ? [
+        `Попробуй написать задачу с временем:\n"завтра в 14:00 встреча" 📌\n\n⚠️ Без даты/времени задача не создаётся.`,
+        `Могу показать задачи — напиши "что у меня сегодня?" 📅`,
+        `Напиши задачу с временем — ${assistantName} поставит напоминание! ⏰`,
+      ]
+    : [
+        `Try a task with time:\n"meeting tomorrow at 14:00" 📌\n\n⚠️ Tasks require date/time.`,
+        `Show tasks — write "what do I have today?" 📅`,
+        `Write task with time — ${assistantName} will set reminder! ⏰`,
+      ];
+
   return { responseText: defaults[Math.floor(Math.random() * defaults.length)], task: null };
 }
 
 const DEFAULT_MESSAGE = (ru: boolean, name: string): Message => ({
   role: "assistant",
   content: ru
-    ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\nПопробуй:\n• "завтра в 12:00 совещание" → поставлю напоминание\n• "что у меня сегодня?" → покажу список\n• "я в стрессе" → помогу\n• 🎤 Нажми микрофон для голосового ввода`
-    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nTry:\n• "meeting tomorrow at 12:00" → I'll set reminder\n• "what today?" → show list\n• "I'm stressed" → I'll help\n• 🎤 Tap mic for voice input`,
+    ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\nПопробуй:\n• "завтра в 12:00 совещание" → поставлю напоминание\n• "что у меня сегодня?" → покажу список\n• "я в стрессе" → помогу\n• 🎤 Нажми микрофон для голосового ввода\n\n⚠️ Задачи создаются только с датой и временем`
+    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nTry:\n• "meeting tomorrow at 12:00" → I'll set reminder\n• "what today?" → show list\n• "I'm stressed" → I'll help\n• 🎤 Tap mic for voice input\n\n⚠️ Tasks require date and time`,
 });
 
 export default function AiProcessPage() {
@@ -333,7 +445,13 @@ export default function AiProcessPage() {
     const stored = localStorage.getItem(`ai-usage-${today}`);
     return stored ? parseInt(stored) : 0;
   });
-  const [pendingTask, setPendingTask] = useState<{ title: string } | null>(null);
+
+  // Состояния для диалога
+  const [pendingTask, setPendingTask] = useState<{ title: string; dueDate?: string } | null>(null);
+  const [waitingAdvance, setWaitingAdvance] = useState(false);
+
+  // Защита от дублирования
+  const sendingRef = useRef(false);
 
   // Голосовой ввод
   const [isListening, setIsListening] = useState(false);
@@ -344,7 +462,6 @@ export default function AiProcessPage() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const AI_FREE_LIMIT = 20;
 
   useEffect(() => {
     const userId = getTelegramUserId();
@@ -359,31 +476,25 @@ export default function AiProcessPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Инициализация голосового ввода
   const startListening = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       const tg = (window as any).Telegram?.WebApp;
-      tg?.showAlert(ru ? "Голосовой ввод не поддерживается в этом браузере" : "Voice input not supported in this browser");
+      tg?.showAlert(ru ? "Голосовой ввод не поддерживается" : "Voice input not supported");
       return;
     }
-
     const recognition = new SpeechRecognition();
     recognition.lang = ru ? "ru-RU" : "en-US";
     recognition.continuous = false;
     recognition.interimResults = false;
-
     recognition.onstart = () => setIsListening(true);
-
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
       setInput(transcript);
       setIsListening(false);
     };
-
     recognition.onerror = () => setIsListening(false);
     recognition.onend = () => setIsListening(false);
-
     recognitionRef.current = recognition;
     recognition.start();
   };
@@ -396,19 +507,16 @@ export default function AiProcessPage() {
   const copyMessage = async (content: string, index: number) => {
     try {
       await navigator.clipboard.writeText(content);
-      setCopiedId(index);
-      setTimeout(() => setCopiedId(null), 2000);
     } catch {
-      // Fallback
       const el = document.createElement("textarea");
       el.value = content;
       document.body.appendChild(el);
       el.select();
       document.execCommand("copy");
       document.body.removeChild(el);
-      setCopiedId(index);
-      setTimeout(() => setCopiedId(null), 2000);
     }
+    setCopiedId(index);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   const saveName = () => {
@@ -424,15 +532,23 @@ export default function AiProcessPage() {
     : ["what do I have today?", "optimize tasks", "I'm stressed", "where to start?"];
 
   const sendMessage = async (text?: string) => {
+    // Защита от дублирования
+    if (sendingRef.current) return;
     const messageText = (text || input).trim();
     if (!messageText || loading) return;
 
     if (!hasSubscription && aiUsageCount >= AI_FREE_LIMIT) {
       const tg = (window as any).Telegram?.WebApp;
-      tg?.showAlert(ru ? `Лимит ${AI_FREE_LIMIT} запросов исчерпан 🤖\n\nОформи подписку.\n\nНапиши боту /subscribe` : `AI limit reached.\n\nGet subscription.\n\nSend /subscribe`);
+      tg?.showAlert(
+        ru
+          ? `Лимит ${AI_FREE_LIMIT} запросов в день исчерпан 🤖\n\nОформи подписку (100 Stars/мес) для безлимитного доступа.\n\nНапиши боту /subscribe`
+          : `Daily limit of ${AI_FREE_LIMIT} requests reached 🤖\n\nGet subscription for unlimited access.\n\nSend /subscribe`
+      );
       tg?.openTelegramLink("https://t.me/aiplannerrubot");
       return;
     }
+
+    sendingRef.current = true;
 
     const userMessage: Message = { role: "user", content: messageText };
     setMessages((prev) => [...prev, userMessage]);
@@ -444,23 +560,41 @@ export default function AiProcessPage() {
     setAiUsageCount(newCount);
     localStorage.setItem(`ai-usage-${today}`, String(newCount));
 
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 400));
 
-    const { responseText, task, needsTime, pendingTitle } = generateAIResponse(
-      messageText, tasks, language, birthdays, assistantName, pendingTask || undefined
+    const { responseText, task, needsTime, pendingTitle, needsAdvance } = generateAIResponse(
+      messageText, tasks, language, birthdays, assistantName,
+      pendingTask, waitingAdvance
     );
 
+    // Обновляем состояние диалога
     if (task && task.title) {
-      await addTask({ title: task.title, dueDate: task.dueDate, priority: task.priority as any, status: "todo", isAiCreated: true, repeat: "none" });
+      await addTask({
+        title: task.title,
+        dueDate: task.dueDate,
+        priority: task.priority as any,
+        status: "todo",
+        isAiCreated: true,
+        repeat: "none",
+      });
       setPendingTask(null);
+      setWaitingAdvance(false);
+    } else if (needsAdvance && pendingTitle) {
+      // Ждём "за сколько напомнить" — сохраняем задачу с датой
+      const dueDate = parseTimeFromText(messageText);
+      setPendingTask({ title: pendingTitle, dueDate: dueDate?.toISOString() });
+      setWaitingAdvance(true);
     } else if (needsTime && pendingTitle) {
       setPendingTask({ title: pendingTitle });
+      setWaitingAdvance(false);
     } else {
       setPendingTask(null);
+      setWaitingAdvance(false);
     }
 
     setMessages((prev) => [...prev, { role: "assistant", content: responseText }]);
     setLoading(false);
+    sendingRef.current = false;
   };
 
   const isLimited = !hasSubscription && aiUsageCount >= AI_FREE_LIMIT;
@@ -476,15 +610,16 @@ export default function AiProcessPage() {
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <p style={{ fontSize: "15px", fontWeight: 700, color: "white", margin: 0 }}>{assistantName}</p>
-            <button
-              onClick={() => { setNewName(assistantName); setShowNameEdit(true); }}
-              style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", fontSize: "12px", color: "rgba(255,255,255,0.3)" }}
-            >
+            <button onClick={() => { setNewName(assistantName); setShowNameEdit(true); }} style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", fontSize: "12px", color: "rgba(255,255,255,0.3)" }}>
               ✏️
             </button>
           </div>
-          <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
-            {hasSubscription ? (ru ? "Подписка ✅" : "Subscription ✅") : ru ? `${Math.max(0, AI_FREE_LIMIT - aiUsageCount)} запросов` : `${Math.max(0, AI_FREE_LIMIT - aiUsageCount)} left`}
+          <p style={{ fontSize: "11px", color: isLimited ? "#fca5a5" : "rgba(255,255,255,0.4)", margin: 0 }}>
+            {hasSubscription
+              ? (ru ? "Подписка активна ✅" : "Subscription active ✅")
+              : isLimited
+              ? (ru ? "Лимит исчерпан — оформи подписку" : "Limit reached — get subscription")
+              : ru ? `${AI_FREE_LIMIT - aiUsageCount} из ${AI_FREE_LIMIT} запросов` : `${AI_FREE_LIMIT - aiUsageCount} of ${AI_FREE_LIMIT} requests`}
           </p>
         </div>
       </div>
@@ -513,11 +648,13 @@ export default function AiProcessPage() {
         </div>
       )}
 
-      {/* Ожидание времени */}
-      {pendingTask && (
+      {/* Статус диалога */}
+      {(pendingTask || waitingAdvance) && (
         <div style={{ backgroundColor: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px", flexShrink: 0 }}>
           <p style={{ fontSize: "12px", color: "#93c5fd", margin: 0 }}>
-            ⏰ {ru ? `Жду время для: "${pendingTask.title}"` : `Waiting time for: "${pendingTask.title}"`}
+            {waitingAdvance
+              ? (ru ? `⏰ За сколько напомнить о "${pendingTask?.title}"?` : `⏰ How early to remind about "${pendingTask?.title}"?`)
+              : (ru ? `📌 Жду время для: "${pendingTask?.title}"` : `📌 Waiting time for: "${pendingTask?.title}"`)}
           </p>
         </div>
       )}
@@ -525,9 +662,15 @@ export default function AiProcessPage() {
       {/* Лимит */}
       {isLimited && (
         <div style={{ backgroundColor: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px", flexShrink: 0, textAlign: "center" }}>
-          <p style={{ fontSize: "12px", color: "#fca5a5", margin: 0 }}>
-            {ru ? "Лимит исчерпан 🤖\nОформи подписку" : "Limit reached 🤖\nGet subscription"}
+          <p style={{ fontSize: "12px", color: "#fca5a5", margin: "0 0 6px 0" }}>
+            {ru ? `Лимит ${AI_FREE_LIMIT} запросов в день исчерпан 🤖` : `Daily limit of ${AI_FREE_LIMIT} requests reached 🤖`}
           </p>
+          <button
+            onClick={() => { const tg = (window as any).Telegram?.WebApp; tg?.openTelegramLink("https://t.me/aiplannerrubot"); }}
+            style={{ height: "30px", paddingLeft: "14px", paddingRight: "14px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+          >
+            {ru ? "Оформить подписку" : "Get subscription"}
+          </button>
         </div>
       )}
 
@@ -543,7 +686,7 @@ export default function AiProcessPage() {
       )}
 
       {/* Сообщения */}
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" as any, display: "flex", flexDirection: "column", gap: "8px", paddingBottom: "4px", minHeight: 0 }}>
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" as any, display: "flex", flexDirection: "column", gap: "12px", paddingBottom: "4px", minHeight: 0 }}>
         {messages.map((msg, i) => (
           <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
             <div style={{ maxWidth: "85%", position: "relative" }}>
@@ -562,21 +705,16 @@ export default function AiProcessPage() {
               <button
                 onClick={() => copyMessage(msg.content, i)}
                 style={{
-                  position: "absolute",
-                  bottom: "-20px",
+                  position: "absolute", bottom: "-18px",
                   right: msg.role === "user" ? "0" : "auto",
                   left: msg.role === "assistant" ? "0" : "auto",
                   background: "none", border: "none", cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: "3px",
-                  padding: "2px 4px",
+                  display: "flex", alignItems: "center", gap: "3px", padding: "2px 4px",
                 }}
               >
                 {copiedId === i
-                  ? <Check size={11} color="#22c55e" />
-                  : <Copy size={11} color="rgba(255,255,255,0.25)" />}
-                {copiedId === i && (
-                  <span style={{ fontSize: "10px", color: "#22c55e" }}>{ru ? "Скопировано" : "Copied"}</span>
-                )}
+                  ? <><Check size={11} color="#22c55e" /><span style={{ fontSize: "10px", color: "#22c55e" }}>{ru ? "Скопировано" : "Copied"}</span></>
+                  : <Copy size={11} color="rgba(255,255,255,0.2)" />}
               </button>
             </div>
           </div>
@@ -598,17 +736,18 @@ export default function AiProcessPage() {
       {/* Поле ввода */}
       <div style={{ display: "flex", gap: "6px", alignItems: "flex-end", paddingTop: "16px", borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
 
-        {/* Кнопка микрофона */}
+        {/* Микрофон */}
         <button
           onClick={isListening ? stopListening : startListening}
+          disabled={isLimited}
           style={{
-            width: "40px", height: "40px", minWidth: "40px",
-            borderRadius: "50%",
+            width: "40px", height: "40px", minWidth: "40px", borderRadius: "50%",
             backgroundColor: isListening ? "#ef4444" : "rgba(255,255,255,0.08)",
             border: isListening ? "2px solid #fca5a5" : "none",
-            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-            flexShrink: 0,
+            cursor: isLimited ? "default" : "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
             animation: isListening ? "pulse 1s ease-in-out infinite" : "none",
+            opacity: isLimited ? 0.3 : 1,
           }}
         >
           {isListening ? <MicOff size={16} color="white" /> : <Mic size={16} color="rgba(255,255,255,0.6)" />}
@@ -620,21 +759,17 @@ export default function AiProcessPage() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
           placeholder={
-            isListening
-              ? (ru ? "Говори..." : "Speaking...")
-              : isLimited
-              ? (ru ? "Лимит..." : "Limit...")
-              : pendingTask
-              ? (ru ? "Укажи время..." : "Enter time...")
-              : (ru ? "Напиши задачу или вопрос..." : "Write task or question...")
+            isListening ? (ru ? "Говори..." : "Speaking...")
+            : isLimited ? (ru ? "Лимит исчерпан..." : "Limit reached...")
+            : waitingAdvance ? (ru ? "За сколько напомнить?" : "How early to remind?")
+            : pendingTask ? (ru ? "Укажи время..." : "Enter time...")
+            : (ru ? "Напиши задачу или вопрос..." : "Write task or question...")
           }
           disabled={isLimited}
           rows={1}
           style={{
             flex: 1,
-            backgroundColor: isListening
-              ? "rgba(239,68,68,0.1)"
-              : isLimited ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.07)",
+            backgroundColor: isListening ? "rgba(239,68,68,0.1)" : isLimited ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.07)",
             border: isListening ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(255,255,255,0.1)",
             borderRadius: "14px", padding: "10px 12px",
             fontSize: "16px", color: isLimited ? "rgba(255,255,255,0.3)" : "white",
@@ -649,7 +784,8 @@ export default function AiProcessPage() {
           style={{
             width: "40px", height: "40px", minWidth: "40px", borderRadius: "50%",
             backgroundColor: input.trim() && !loading && !isLimited ? "#3b82f6" : "rgba(255,255,255,0.08)",
-            border: "none", cursor: input.trim() && !loading && !isLimited ? "pointer" : "default",
+            border: "none",
+            cursor: input.trim() && !loading && !isLimited ? "pointer" : "default",
             display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
           }}
         >
