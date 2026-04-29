@@ -1,16 +1,26 @@
 import { useState, useRef, useEffect } from "react";
-import { useTaskStore, checkSubscription, getTelegramUserId, saveChatHistory, loadChatHistory } from "@/lib/store";
+import {
+  useTaskStore,
+  checkSubscription,
+  getTelegramUserId,
+  saveChatHistory,
+  loadChatHistory,
+} from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
 import { Send, Bot, Loader2 } from "lucide-react";
 
-const GROQ_API_KEY = "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";
+const OPENROUTER_API_KEY = "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";
+const MODEL = "meta-llama/llama-3.3-70b-instruct:free";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
-async function askGroq(messages: Message[], tasksSummary: string): Promise<string> {
+async function askAI(
+  messages: Message[],
+  tasksSummary: string
+): Promise<string> {
   const systemPrompt = `Ты умный AI ассистент планировщика задач CortexAI.
 
 Ты умеешь:
@@ -18,7 +28,7 @@ async function askGroq(messages: Message[], tasksSummary: string): Promise<strin
 2. Анализировать задачи и давать советы
 3. Давать ментальные советы для снижения стресса
 
-ВАЖНО: Если пользователь хочет создать задачу (например "напомни мне", "через 10 минут", "сделать", "нужно"), 
+ВАЖНО: Если пользователь хочет создать задачу (например "напомни мне", "через 10 минут", "сделать", "нужно"),
 верни JSON в конце ответа в таком формате:
 TASK_JSON:{"title":"название задачи","dueDate":"2024-01-15T14:30:00.000Z","priority":"medium"}
 
@@ -27,30 +37,35 @@ ${tasksSummary}
 
 Текущее время: ${new Date().toLocaleString("ru-RU")}
 
-Отвечай кратко, дружелюбно. Используй эмодзи.`;
+Отвечай кратко, дружелюбно. Используй эмодзи. Максимум 3-4 предложения.`;
 
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${GROQ_API_KEY}`,
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      "HTTP-Referer": "https://cortex-ai-miniapp.vercel.app",
+      "X-Title": "CortexAI Planner",
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      messages: [{ role: "system", content: systemPrompt }, ...messages],
-      max_tokens: 500,
+      model: MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ],
+      max_tokens: 400,
       temperature: 0.7,
     }),
   });
 
   if (!res.ok) {
     const err = await res.text();
-    console.error("Groq error:", res.status, err);
+    console.error("OpenRouter error:", res.status, err);
     throw new Error(`API ${res.status}: ${err}`);
   }
 
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || "Не удалось получить ответ от AI";
+  return data.choices?.[0]?.message?.content || "Нет ответа";
 }
 
 function parseTaskFromResponse(response: string): {
@@ -71,8 +86,8 @@ function parseTaskFromResponse(response: string): {
 const DEFAULT_MESSAGE = (ru: boolean): Message => ({
   role: "assistant",
   content: ru
-    ? "Привет! 👋 Я твой AI ассистент.\n\nМогу помочь:\n• Создать задачу голосом 🎯\n• Оптимизировать список дел 📋\n• Снизить стресс 🧘\n\nПопробуй написать: \"через 30 минут позвонить маме\""
-    : "Hi! 👋 I'm your AI assistant.\n\nI can help:\n• Create tasks by voice 🎯\n• Optimize your todo list 📋\n• Reduce stress 🧘\n\nTry: \"call mom in 30 minutes\"",
+    ? "Привет! 👋 Я твой AI ассистент.\n\nМогу помочь:\n• Создать задачу 🎯\n• Оптимизировать список дел 📋\n• Снизить стресс 🧘\n\nПопробуй написать: \"через 30 минут позвонить маме\""
+    : "Hi! 👋 I'm your AI assistant.\n\nI can help:\n• Create tasks 🎯\n• Optimize your todo list 📋\n• Reduce stress 🧘\n\nTry: \"call mom in 30 minutes\"",
 });
 
 export default function AiProcessPage() {
@@ -106,7 +121,7 @@ export default function AiProcessPage() {
   });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const AI_FREE_LIMIT = 5;
+  const AI_FREE_LIMIT = 10;
 
   useEffect(() => {
     const userId = getTelegramUserId();
@@ -129,8 +144,18 @@ export default function AiProcessPage() {
   };
 
   const quickQuestions = ru
-    ? ["через 1 час позвонить", "оптимизируй задачи", "как снизить стресс?", "с чего начать?"]
-    : ["call in 1 hour", "optimize tasks", "reduce stress?", "where to start?"];
+    ? [
+        "через 1 час позвонить",
+        "оптимизируй задачи",
+        "как снизить стресс?",
+        "с чего начать?",
+      ]
+    : [
+        "call in 1 hour",
+        "optimize tasks",
+        "reduce stress?",
+        "where to start?",
+      ];
 
   const sendMessage = async (text?: string) => {
     const messageText = (text || input).trim();
@@ -140,8 +165,8 @@ export default function AiProcessPage() {
       const tg = (window as any).Telegram?.WebApp;
       tg?.showAlert(
         ru
-          ? `Лимит ${AI_FREE_LIMIT} запросов к AI исчерпан 🤖\n\nОформи подписку (100 Stars/мес) для неограниченного доступа.\n\nНапиши боту /subscribe`
-          : `AI limit of ${AI_FREE_LIMIT} requests reached 🤖\n\nGet subscription for unlimited access.\n\nSend /subscribe to bot`
+          ? `Лимит ${AI_FREE_LIMIT} запросов исчерпан 🤖\n\nОформи подписку (100 Stars/мес).\n\nНапиши боту /subscribe`
+          : `AI limit of ${AI_FREE_LIMIT} requests reached 🤖\n\nGet subscription.\n\nSend /subscribe to bot`
       );
       tg?.openTelegramLink("https://t.me/aiplannerrubot");
       return;
@@ -155,7 +180,7 @@ export default function AiProcessPage() {
     incrementUsage();
 
     try {
-      const reply = await askGroq(updatedMessages.slice(1), tasksSummary);
+      const reply = await askAI(updatedMessages.slice(1), tasksSummary);
       const { text, task } = parseTaskFromResponse(reply);
 
       if (task) {
@@ -168,13 +193,20 @@ export default function AiProcessPage() {
           repeat: "none",
         });
 
-        const confirmMsg = ru
-          ? `✅ Задача создана: "${task.title}"\n\n${text}`
-          : `✅ Task created: "${task.title}"\n\n${text}`;
-
-        setMessages((prev) => [...prev, { role: "assistant", content: confirmMsg }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: ru
+              ? `✅ Задача создана: "${task.title}"\n\n${text}`
+              : `✅ Task created: "${task.title}"\n\n${text}`,
+          },
+        ]);
       } else {
-        setMessages((prev) => [...prev, { role: "assistant", content: text }]);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: text },
+        ]);
       }
     } catch (err: any) {
       setMessages((prev) => [
@@ -182,8 +214,8 @@ export default function AiProcessPage() {
         {
           role: "assistant",
           content: ru
-            ? `⚠️ Ошибка: ${err?.message || "Попробуй позже"}`
-            : `⚠️ Error: ${err?.message || "Try again later"}`,
+            ? "⚠️ Ошибка подключения. Попробуй ещё раз."
+            : "⚠️ Connection error. Try again.",
         },
       ]);
     } finally {
@@ -228,17 +260,30 @@ export default function AiProcessPage() {
           <Bot size={22} color="#3b82f6" />
         </div>
         <div style={{ flex: 1 }}>
-          <p style={{ fontSize: "17px", fontWeight: 700, color: "white", margin: 0 }}>
+          <p
+            style={{
+              fontSize: "17px",
+              fontWeight: 700,
+              color: "white",
+              margin: 0,
+            }}
+          >
             AI {ru ? "Ассистент" : "Assistant"}
           </p>
-          <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+          <p
+            style={{
+              fontSize: "12px",
+              color: "rgba(255,255,255,0.4)",
+              margin: 0,
+            }}
+          >
             {hasSubscription
               ? ru
                 ? "Подписка активна ✅"
                 : "Subscription active ✅"
               : ru
-              ? `${Math.max(0, AI_FREE_LIMIT - aiUsageCount)} запросов осталось`
-              : `${Math.max(0, AI_FREE_LIMIT - aiUsageCount)} requests left`}
+              ? `${AI_FREE_LIMIT - aiUsageCount} запросов осталось`
+              : `${AI_FREE_LIMIT - aiUsageCount} requests left`}
           </p>
         </div>
       </div>
@@ -253,12 +298,13 @@ export default function AiProcessPage() {
             padding: "12px",
             marginBottom: "10px",
             flexShrink: 0,
+            textAlign: "center",
           }}
         >
-          <p style={{ fontSize: "13px", color: "#fca5a5", margin: 0, textAlign: "center" }}>
+          <p style={{ fontSize: "13px", color: "#fca5a5", margin: 0 }}>
             {ru
-              ? "Лимит бесплатных запросов исчерпан 🤖\nОформи подписку для продолжения"
-              : "Free AI limit reached 🤖\nGet subscription to continue"}
+              ? "Лимит исчерпан 🤖\nОформи подписку для продолжения"
+              : "Free limit reached 🤖\nGet subscription to continue"}
           </p>
         </div>
       )}
@@ -322,17 +368,26 @@ export default function AiProcessPage() {
                 maxWidth: "85%",
                 padding: "10px 14px",
                 borderRadius:
-                  msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                  msg.role === "user"
+                    ? "16px 16px 4px 16px"
+                    : "16px 16px 16px 4px",
                 backgroundColor:
-                  msg.role === "user" ? "#3b82f6" : "rgba(255,255,255,0.07)",
+                  msg.role === "user"
+                    ? "#3b82f6"
+                    : "rgba(255,255,255,0.07)",
                 border:
-                  msg.role === "assistant" ? "1px solid rgba(255,255,255,0.08)" : "none",
+                  msg.role === "assistant"
+                    ? "1px solid rgba(255,255,255,0.08)"
+                    : "none",
               }}
             >
               <p
                 style={{
                   fontSize: "14px",
-                  color: msg.role === "user" ? "white" : "rgba(255,255,255,0.9)",
+                  color:
+                    msg.role === "user"
+                      ? "white"
+                      : "rgba(255,255,255,0.9)",
                   margin: 0,
                   lineHeight: "1.5",
                   whiteSpace: "pre-wrap",
@@ -363,12 +418,18 @@ export default function AiProcessPage() {
                 color="rgba(255,255,255,0.5)"
                 style={{ animation: "spin 1s linear infinite" }}
               />
-              <span style={{ fontSize: "13px", color: "rgba(255,255,255,0.5)" }}>
+              <span
+                style={{
+                  fontSize: "13px",
+                  color: "rgba(255,255,255,0.5)",
+                }}
+              >
                 {ru ? "Думаю..." : "Thinking..."}
               </span>
             </div>
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -434,7 +495,10 @@ export default function AiProcessPage() {
                 ? "#3b82f6"
                 : "rgba(255,255,255,0.08)",
             border: "none",
-            cursor: input.trim() && !loading && !isLimited ? "pointer" : "default",
+            cursor:
+              input.trim() && !loading && !isLimited
+                ? "pointer"
+                : "default",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -446,7 +510,10 @@ export default function AiProcessPage() {
       </div>
 
       <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
         textarea::placeholder { color: rgba(255,255,255,0.3); }
       `}</style>
     </div>
