@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Home, Calendar, Bot, Settings } from "lucide-react";
 import HomePage from "@/pages/HomePage";
 import CalendarPage from "@/pages/CalendarPage";
@@ -14,28 +14,30 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("home");
   const language = useI18nStore((state) => state.language);
   const ru = language === "ru";
+  const appHeightRef = useRef<number>(0);
 
   usePersistTasks();
 
-  // Раскрываем Telegram Mini App на весь экран
   useEffect(() => {
-    try {
-      const tg = (window as any).Telegram?.WebApp;
-      if (tg) {
-        tg.expand();
-        tg.ready();
-      }
-    } catch {}
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg) {
+      tg.expand();
+      tg.ready();
+    }
 
-    // Фиксим высоту для мобильных
-    const setHeight = () => {
-      const vh = window.innerHeight * 0.01;
-      document.documentElement.style.setProperty("--vh", `${vh}px`);
+    // Фиксируем высоту один раз при загрузке
+    const fixHeight = () => {
+      const h = window.innerHeight;
+      if (h > appHeightRef.current) {
+        appHeightRef.current = h;
+        document.documentElement.style.setProperty("--app-height", `${h}px`);
+      }
     };
 
-    setHeight();
-    window.addEventListener("resize", setHeight);
-    return () => window.removeEventListener("resize", setHeight);
+    fixHeight();
+
+    // Небольшая задержка для корректного получения высоты
+    setTimeout(fixHeight, 300);
   }, []);
 
   const tabs = [
@@ -52,11 +54,51 @@ export default function App() {
           margin: 0;
           padding: 0;
           box-sizing: border-box;
+          -webkit-tap-highlight-color: transparent;
         }
-        html, body, #root {
+
+        :root {
+          --app-height: 100vh;
+          --nav-height: 68px;
+        }
+
+        html {
           height: 100%;
           overflow: hidden;
-          background-color: #0f172a;
+          background: #0f172a;
+        }
+
+        body {
+          height: 100%;
+          overflow: hidden;
+          background: #0f172a;
+          position: fixed;
+          width: 100%;
+          top: 0;
+          left: 0;
+        }
+
+        #root {
+          height: 100%;
+          overflow: hidden;
+        }
+
+        /* Запрещаем body скакать при клавиатуре */
+        input, textarea, select {
+          font-size: 16px !important;
+        }
+
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); opacity: 0.4; }
+          50% { transform: translateY(-4px); opacity: 1; }
+        }
+
+        textarea::placeholder {
+          color: rgba(255,255,255,0.3);
+        }
+
+        input::placeholder {
+          color: rgba(255,255,255,0.3);
         }
       `}</style>
 
@@ -75,14 +117,16 @@ export default function App() {
           overflow: "hidden",
         }}
       >
-        {/* Основной контент — прокручивается */}
+        {/* Контент */}
         <div
           style={{
             flex: 1,
             overflowY: "auto",
             overflowX: "hidden",
             WebkitOverflowScrolling: "touch",
-            paddingBottom: "80px",
+            paddingBottom: "var(--nav-height)",
+            // Не меняем высоту при клавиатуре
+            minHeight: 0,
           }}
         >
           <div
@@ -101,16 +145,25 @@ export default function App() {
           </div>
         </div>
 
-        {/* Кнопка + только на главной */}
+        {/* Кнопка + */}
         {tab === "home" && <AddBtn />}
 
-        {/* Нижняя навигация — ВСЕГДА на месте */}
+        {/* Нижняя навигация — ФИКСИРОВАННАЯ */}
         <div
           style={{
-            position: "relative",
-            flexShrink: 0,
+            position: "fixed",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: "var(--nav-height)",
             backgroundColor: "rgba(10,15,30,0.98)",
             borderTop: "1px solid rgba(255,255,255,0.07)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            zIndex: 100,
+            // Ключевое — не двигаемся при клавиатуре
+            transform: "translateZ(0)",
+            willChange: "transform",
           }}
         >
           <div
@@ -118,9 +171,10 @@ export default function App() {
               display: "flex",
               justifyContent: "space-around",
               alignItems: "center",
+              height: "100%",
               maxWidth: "480px",
               margin: "0 auto",
-              padding: "8px 0 24px 0",
+              paddingBottom: "env(safe-area-inset-bottom, 8px)",
             }}
           >
             {tabs.map(({ id, icon: Icon, label }) => {
@@ -137,7 +191,7 @@ export default function App() {
                     background: "none",
                     border: "none",
                     cursor: "pointer",
-                    padding: "6px 16px",
+                    padding: "6px 20px",
                     WebkitTapHighlightColor: "transparent",
                   }}
                 >
