@@ -24,13 +24,12 @@ interface Message {
   content: string;
 }
 
-// ============ БЛОК 3 — УЛУЧШЕННЫЙ ПАРСИНГ ВРЕМЕНИ ============
+// ============ ПАРСИНГ ВРЕМЕНИ ============
 
 function parseTimeFromText(inputText: string): Date | null {
   const now = new Date();
   const lower = inputText.toLowerCase().trim();
 
-  // через X минут/мин
   const minMatch = lower.match(/через\s+(\d+)\s*(минут|мин|m)/);
   if (minMatch) {
     const d = new Date(now);
@@ -38,7 +37,6 @@ function parseTimeFromText(inputText: string): Date | null {
     return d;
   }
 
-  // через X часов/час/ч
   const hourMatch = lower.match(/через\s+(\d+)\s*(часов|часа|час|ч|h)/);
   if (hourMatch) {
     const d = new Date(now);
@@ -46,7 +44,6 @@ function parseTimeFromText(inputText: string): Date | null {
     return d;
   }
 
-  // через X дней
   const dayMatch = lower.match(/через\s+(\d+)\s*(дней|дня|день)/);
   if (dayMatch) {
     const d = new Date(now);
@@ -55,7 +52,6 @@ function parseTimeFromText(inputText: string): Date | null {
     return d;
   }
 
-  // "в час" = 13:00
   if (/в\s+час\b/.test(lower)) {
     const d = new Date(now);
     d.setHours(13, 0, 0, 0);
@@ -63,7 +59,6 @@ function parseTimeFromText(inputText: string): Date | null {
     return d;
   }
 
-  // Словесные часы
   const wordHours: Record<string, number> = {
     "полночь": 0, "полдень": 12,
     "два": 14, "двух": 14, "двенадцать": 12,
@@ -83,7 +78,6 @@ function parseTimeFromText(inputText: string): Date | null {
     }
   }
 
-  // Числовое время: "в 14:30", "в 14", "в 9:00"
   const timeMatch = lower.match(/в\s+(\d{1,2})(?::(\d{2}))?(?:\s|$)/);
   if (timeMatch) {
     const hour = parseInt(timeMatch[1]);
@@ -96,7 +90,6 @@ function parseTimeFromText(inputText: string): Date | null {
     }
   }
 
-  // "завтра [в X]"
   if (lower.includes("завтра")) {
     const d = new Date(now);
     d.setDate(d.getDate() + 1);
@@ -109,7 +102,6 @@ function parseTimeFromText(inputText: string): Date | null {
     return d;
   }
 
-  // "послезавтра [в X]"
   if (lower.includes("послезавтра")) {
     const d = new Date(now);
     d.setDate(d.getDate() + 2);
@@ -122,7 +114,6 @@ function parseTimeFromText(inputText: string): Date | null {
     return d;
   }
 
-  // "сегодня [в X]"
   if (lower.includes("сегодня")) {
     const d = new Date(now);
     const m = lower.match(/в\s+(\d{1,2})(?::(\d{2}))?/);
@@ -131,11 +122,11 @@ function parseTimeFromText(inputText: string): Date | null {
       if (d <= now) d.setDate(d.getDate() + 1);
     } else {
       d.setHours(18, 0, 0, 0);
+      if (d <= now) d.setDate(d.getDate() + 1);
     }
     return d;
   }
 
-  // Время суток
   if (lower.includes("утром")) {
     const d = new Date(now);
     d.setHours(9, 0, 0, 0);
@@ -171,8 +162,17 @@ function detectPriority(inputText: string): "low" | "medium" | "high" {
   return "medium";
 }
 
+// БЛОК 4: Улучшенное распознавание намерений
 function isTaskCreationIntent(inputText: string): boolean {
   const lower = inputText.toLowerCase();
+
+  // Прямые фразы с временем — всегда задача
+  const hasDirectTimePhrase =
+    /напомни\s+(сегодня|завтра|через|утром|вечером|ночью|в\s+\d)/.test(lower) ||
+    /remind\s+(today|tomorrow|in\s+\d|tonight)/.test(lower);
+
+  if (hasDirectTimePhrase) return true;
+
   return [
     "напомни", "напоминание", "создай задачу", "нужно", "надо",
     "поставь", "запланируй", "встреча", "совещание", "созвон",
@@ -279,6 +279,44 @@ function generateAIResponse(
     };
   }
 
+  // БЛОК 4: Быстрое создание задачи с явным временем
+  // "напомни сегодня", "напомни завтра", "напомни через час"
+  const quickTimePatterns = [
+    /напомни\s+сегодня/,
+    /напомни\s+завтра/,
+    /напомни\s+через/,
+    /напомни\s+утром/,
+    /напомни\s+вечером/,
+    /напомни\s+ночью/,
+    /напомни\s+в\s+\d/,
+    /remind\s+today/,
+    /remind\s+tomorrow/,
+    /remind\s+in\s+\d/,
+  ];
+
+  const isQuickReminder = quickTimePatterns.some((p) => p.test(lower));
+
+  if (isQuickReminder) {
+    const dueDate = parseTimeFromText(userText);
+    const rawTitle = userText
+      .replace(/напомни\s+(мне\s+)?/gi, "")
+      .replace(/remind\s+(me\s+)?/gi, "")
+      .trim();
+    const title = extractTaskTitle(rawTitle) || (ru ? "Напоминание" : "Reminder");
+
+    if (dueDate) {
+      const timeStr = dueDate.toLocaleString(ru ? "ru-RU" : "en-US", {
+        hour: "2-digit", minute: "2-digit", day: "numeric", month: "short",
+      });
+      return {
+        responseText: ru
+          ? `✅ Поставила напоминание!\n\n📌 ${title}\n⏰ ${timeStr}\n\nЗадача добавлена в список!`
+          : `✅ Reminder set!\n\n📌 ${title}\n⏰ ${timeStr}\n\nTask added to list!`,
+        task: { title, dueDate: dueDate.toISOString(), priority: "medium" },
+      };
+    }
+  }
+
   // "Что у меня сегодня?"
   if (
     lower.includes("что у меня") || lower.includes("какие задачи") ||
@@ -306,7 +344,9 @@ function generateAIResponse(
     } else {
       response += ru ? `📋 Задачи (${todayTasks.length}):\n` : `📋 Tasks (${todayTasks.length}):\n`;
       todayTasks.forEach((t, i) => {
-        const time = t.dueDate ? new Date(t.dueDate).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "";
+        const time = t.dueDate
+          ? new Date(t.dueDate).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+          : "";
         response += `${i + 1}. ${t.status === "done" ? "✅" : "⬜"} ${t.title}${time ? ` — ${time}` : ""}\n`;
       });
     }
@@ -333,8 +373,8 @@ function generateAIResponse(
       }
       return {
         responseText: ru
-          ? `📌 Понял: "${title}"\n\n⚠️ Задачи создаются только с датой и временем.\n\nКогда напомнить?\n"завтра в 10:00" или "через 2 часа"`
-          : `📌 Got it: "${title}"\n\n⚠️ Tasks require date and time.\n\nWhen to remind?\n"tomorrow at 10:00" or "in 2 hours"`,
+          ? `📌 Понял: "${title}"\n\n⚠️ Задачи создаются только с датой и временем.\n\nКогда напомнить?\n"завтра в 10:00" / "через 2 часа" / "сегодня вечером"`
+          : `📌 Got it: "${title}"\n\n⚠️ Tasks require date and time.\n\nWhen?\n"tomorrow at 10:00" / "in 2 hours" / "this evening"`,
         task: null, needsTime: true, pendingTitle: title,
       };
     }
@@ -425,8 +465,8 @@ function generateAIResponse(
   if (lower.includes("привет") || lower.includes("hello") || lower.includes("hi")) {
     return {
       responseText: ru
-        ? `Привет! 👋 Я ${assistantName}.\n\nПопробуй:\n• "завтра в 12 совещание"\n• "что у меня сегодня?"\n• "я в стрессе"\n• 🎤 Нажми микрофон`
-        : `Hello! 👋 I'm ${assistantName}.\n\nTry:\n• "meeting tomorrow at 12"\n• "what do I have today?"\n• "I'm stressed"\n• 🎤 Tap mic`,
+        ? `Привет! 👋 Я ${assistantName}.\n\nПопробуй:\n• "напомни завтра в 10 встреча"\n• "напомни сегодня вечером позвонить"\n• "через 2 часа купить молоко"\n• "что у меня сегодня?"\n• 🎤 Нажми микрофон`
+        : `Hello! 👋 I'm ${assistantName}.\n\nTry:\n• "remind tomorrow at 10 meeting"\n• "remind today evening call"\n• "in 2 hours buy milk"\n• "what do I have today?"\n• 🎤 Tap mic`,
       task: null,
     };
   }
@@ -435,8 +475,8 @@ function generateAIResponse(
   if (lower.includes("помог") || lower.includes("help") || lower.includes("умеешь")) {
     return {
       responseText: ru
-        ? `🤖 ${assistantName} умеет:\n\n📌 Задачи (с датой!):\n"завтра в 10 встреча"\n"через 30 мин позвонить"\n"сегодня вечером купить"\n\n📅 План дня:\n"что у меня сегодня?"\n\n📊 Анализ:\n"оптимизируй задачи"\n\n🧘 Поддержка:\n"я в стрессе"\n\n⚠️ Задачи без времени не создаются!`
-        : `🤖 ${assistantName} can:\n\n📌 Tasks (with time!):\n"meeting tomorrow at 10"\n"call in 30 min"\n\n📅 Day plan:\n"what do I have today?"\n\n📊 Analysis:\n"optimize tasks"\n\n🧘 Support:\n"I'm stressed"\n\n⚠️ Tasks require date/time!`,
+        ? `🤖 ${assistantName} умеет:\n\n📌 Создавать задачи:\n"напомни завтра в 10 встреча"\n"напомни сегодня вечером"\n"через 30 мин позвонить"\n\n📅 Показывать план:\n"что у меня сегодня?"\n\n📊 Анализировать:\n"оптимизируй задачи"\n\n🧘 Помогать:\n"я в стрессе"\n\n⚠️ Задачи только с датой/временем!`
+        : `🤖 ${assistantName} can:\n\n📌 Create tasks:\n"remind tomorrow at 10 meeting"\n"remind today evening"\n"in 30 min call"\n\n📅 Show plan:\n"what do I have today?"\n\n📊 Analyze:\n"optimize tasks"\n\n🧘 Help:\n"I'm stressed"\n\n⚠️ Tasks require date/time!`,
       task: null,
     };
   }
@@ -444,13 +484,13 @@ function generateAIResponse(
   // Дефолт
   const defaults = ru
     ? [
-        `Попробуй написать задачу с временем:\n"завтра в 14:00 встреча" 📌`,
-        `Могу показать задачи — напиши "что у меня сегодня?" 📅`,
+        `Попробуй:\n"напомни завтра в 14:00 встреча" 📌\n"напомни сегодня вечером позвонить" 📌`,
+        `Напиши "что у меня сегодня?" чтобы увидеть план 📅`,
         `Напиши задачу с временем — ${assistantName} поставит напоминание! ⏰`,
       ]
     : [
-        `Try: "meeting tomorrow at 14:00" 📌`,
-        `Write "what do I have today?" to see tasks 📅`,
+        `Try:\n"remind tomorrow at 14:00 meeting" 📌\n"remind today evening call" 📌`,
+        `Write "what do I have today?" to see your plan 📅`,
         `Write task with time — ${assistantName} will set reminder! ⏰`,
       ];
 
@@ -460,8 +500,8 @@ function generateAIResponse(
 const DEFAULT_MESSAGE = (ru: boolean, name: string): Message => ({
   role: "assistant",
   content: ru
-    ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\nПопробуй:\n• "завтра в 12:00 совещание" → поставлю напоминание\n• "что у меня сегодня?" → покажу список\n• "я в стрессе" → помогу\n• 🎤 Нажми микрофон для голосового ввода\n\n⚠️ Задачи создаются только с датой и временем`
-    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nTry:\n• "meeting tomorrow at 12:00" → I'll set reminder\n• "what today?" → show list\n• "I'm stressed" → I'll help\n• 🎤 Tap mic for voice\n\n⚠️ Tasks require date and time`,
+    ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\nПопробуй:\n• "напомни завтра в 12:00 совещание"\n• "напомни сегодня вечером позвонить"\n• "через час купить продукты"\n• "что у меня сегодня?"\n• 🎤 Нажми микрофон\n\n⚠️ Задачи создаются только с датой и временем`
+    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nTry:\n• "remind tomorrow at 12:00 meeting"\n• "remind today evening call"\n• "in 1 hour buy groceries"\n• "what do I have today?"\n• 🎤 Tap mic\n\n⚠️ Tasks require date and time`,
 });
 
 export default function AiProcessPage() {
@@ -483,10 +523,7 @@ export default function AiProcessPage() {
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-
-  // БЛОК 4 — правильная проверка подписки
   const [hasSubscription, setHasSubscription] = useState<boolean | null>(null);
-
   const [aiUsageCount, setAiUsageCount] = useState(() => {
     const today = new Date().toISOString().split("T")[0];
     const stored = localStorage.getItem(`ai-usage-${today}`);
@@ -495,7 +532,6 @@ export default function AiProcessPage() {
 
   const [pendingTask, setPendingTask] = useState<{ title: string; dueDate?: string } | null>(null);
   const [waitingAdvance, setWaitingAdvance] = useState(false);
-
   const sendingRef = useRef(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -503,15 +539,12 @@ export default function AiProcessPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Загружаем статус подписки
   useEffect(() => {
     const userId = getTelegramUserId();
-    checkSubscription(userId).then((result) => {
-      setHasSubscription(result);
-    });
+    checkSubscription(userId).then(setHasSubscription);
   }, []);
 
-  // БЛОК 4 — сбрасываем счётчик если есть подписка
+  // БЛОК 4: Сбрасываем счётчик если есть подписка
   useEffect(() => {
     if (hasSubscription === true) {
       setAiUsageCount(0);
@@ -578,15 +611,15 @@ export default function AiProcessPage() {
   };
 
   const quickQuestions = ru
-    ? ["что у меня сегодня?", "оптимизируй задачи", "я в стрессе", "с чего начать?"]
-    : ["what do I have today?", "optimize tasks", "I'm stressed", "where to start?"];
+    ? ["что у меня сегодня?", "напомни завтра утром", "я в стрессе", "с чего начать?"]
+    : ["what do I have today?", "remind tomorrow morning", "I'm stressed", "where to start?"];
 
   const sendMessage = async (text?: string) => {
     if (sendingRef.current) return;
     const messageText = (text || input).trim();
     if (!messageText || loading) return;
 
-    // БЛОК 4 — лимит только для тех у кого точно нет подписки
+    // БЛОК 4: Лимит только для тех у кого точно нет подписки
     if (hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT) {
       const tg = (window as any).Telegram?.WebApp;
       tg?.showAlert(
@@ -605,7 +638,7 @@ export default function AiProcessPage() {
     setInput("");
     setLoading(true);
 
-    // Считаем запросы только если нет подписки
+    // Считаем только если нет подписки
     if (hasSubscription === false) {
       const today = new Date().toISOString().split("T")[0];
       const newCount = aiUsageCount + 1;
@@ -613,7 +646,7 @@ export default function AiProcessPage() {
       localStorage.setItem(`ai-usage-${today}`, String(newCount));
     }
 
-    // БЛОК 2 — минимальная задержка для UX
+    // Минимальная задержка для UX
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     const { responseText, task, needsTime, pendingTitle, needsAdvance } = generateAIResponse(
@@ -629,6 +662,7 @@ export default function AiProcessPage() {
         status: "todo",
         isAiCreated: true,
         repeat: "none",
+        type: "task",
       });
       setPendingTask(null);
       setWaitingAdvance(false);
@@ -649,7 +683,6 @@ export default function AiProcessPage() {
     sendingRef.current = false;
   };
 
-  // БЛОК 4 — null означает что ещё загружается, не показываем лимит
   const isLimited = hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT;
 
   return (
@@ -663,10 +696,7 @@ export default function AiProcessPage() {
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <p style={{ fontSize: "15px", fontWeight: 700, color: "white", margin: 0 }}>{assistantName}</p>
-            <button
-              onClick={() => { setNewName(assistantName); setShowNameEdit(true); }}
-              style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", fontSize: "12px", color: "rgba(255,255,255,0.3)" }}
-            >
+            <button onClick={() => { setNewName(assistantName); setShowNameEdit(true); }} style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", fontSize: "12px", color: "rgba(255,255,255,0.3)" }}>
               ✏️
             </button>
           </div>
@@ -685,23 +715,11 @@ export default function AiProcessPage() {
       {/* Редактирование имени */}
       {showNameEdit && (
         <div style={{ backgroundColor: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "12px", padding: "10px 12px", marginBottom: "8px", flexShrink: 0 }}>
-          <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 6px 0" }}>
-            {ru ? "Имя ассистента" : "Assistant name"}
-          </p>
+          <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 6px 0" }}>{ru ? "Имя ассистента" : "Assistant name"}</p>
           <div style={{ display: "flex", gap: "8px" }}>
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveName()}
-              placeholder={ru ? "Введи имя..." : "Enter name..."}
-              style={{ flex: 1, height: "34px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "10px", paddingRight: "10px", fontSize: "14px", color: "white", outline: "none", fontFamily: "inherit" }}
-            />
-            <button onClick={saveName} style={{ height: "34px", paddingLeft: "12px", paddingRight: "12px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
-              {ru ? "Сохранить" : "Save"}
-            </button>
-            <button onClick={() => setShowNameEdit(false)} style={{ height: "34px", paddingLeft: "10px", paddingRight: "10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "transparent", color: "rgba(255,255,255,0.5)", fontSize: "12px", cursor: "pointer" }}>
-              ✕
-            </button>
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveName()} placeholder={ru ? "Введи имя..." : "Enter name..."} style={{ flex: 1, height: "34px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "10px", paddingRight: "10px", fontSize: "14px", color: "white", outline: "none", fontFamily: "inherit" }} />
+            <button onClick={saveName} style={{ height: "34px", paddingLeft: "12px", paddingRight: "12px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>{ru ? "Сохранить" : "Save"}</button>
+            <button onClick={() => setShowNameEdit(false)} style={{ height: "34px", paddingLeft: "10px", paddingRight: "10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "transparent", color: "rgba(255,255,255,0.5)", fontSize: "12px", cursor: "pointer" }}>✕</button>
           </div>
         </div>
       )}
@@ -721,12 +739,9 @@ export default function AiProcessPage() {
       {isLimited && (
         <div style={{ backgroundColor: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px", flexShrink: 0, textAlign: "center" }}>
           <p style={{ fontSize: "12px", color: "#fca5a5", margin: "0 0 6px 0" }}>
-            {ru ? `Лимит ${AI_FREE_LIMIT} запросов в день исчерпан 🤖` : `Daily limit of ${AI_FREE_LIMIT} requests reached 🤖`}
+            {ru ? `Лимит ${AI_FREE_LIMIT} запросов в день 🤖` : `Daily limit of ${AI_FREE_LIMIT} requests 🤖`}
           </p>
-          <button
-            onClick={() => { const tg = (window as any).Telegram?.WebApp; tg?.openTelegramLink("https://t.me/aiplannerrubot"); }}
-            style={{ height: "30px", paddingLeft: "14px", paddingRight: "14px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-          >
+          <button onClick={() => { const tg = (window as any).Telegram?.WebApp; tg?.openTelegramLink("https://t.me/aiplannerrubot"); }} style={{ height: "30px", paddingLeft: "14px", paddingRight: "14px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
             {ru ? "Оформить подписку" : "Get subscription"}
           </button>
         </div>
@@ -748,20 +763,12 @@ export default function AiProcessPage() {
         {messages.map((msg, i) => (
           <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
             <div style={{ maxWidth: "85%", position: "relative" }}>
-              <div style={{
-                padding: "9px 13px",
-                borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
-                backgroundColor: msg.role === "user" ? "#3b82f6" : "rgba(255,255,255,0.07)",
-                border: msg.role === "assistant" ? "1px solid rgba(255,255,255,0.08)" : "none",
-              }}>
+              <div style={{ padding: "9px 13px", borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px", backgroundColor: msg.role === "user" ? "#3b82f6" : "rgba(255,255,255,0.07)", border: msg.role === "assistant" ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
                 <p style={{ fontSize: "14px", color: msg.role === "user" ? "white" : "rgba(255,255,255,0.9)", margin: 0, lineHeight: "1.5", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                   {msg.content}
                 </p>
               </div>
-              <button
-                onClick={() => copyMessage(msg.content, i)}
-                style={{ position: "absolute", bottom: "-18px", right: msg.role === "user" ? "0" : "auto", left: msg.role === "assistant" ? "0" : "auto", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px", padding: "2px 4px" }}
-              >
+              <button onClick={() => copyMessage(msg.content, i)} style={{ position: "absolute", bottom: "-18px", right: msg.role === "user" ? "0" : "auto", left: msg.role === "assistant" ? "0" : "auto", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px", padding: "2px 4px" }}>
                 {copiedId === i
                   ? <><Check size={11} color="#22c55e" /><span style={{ fontSize: "10px", color: "#22c55e" }}>{ru ? "Скопировано" : "Copied"}</span></>
                   : <Copy size={11} color="rgba(255,255,255,0.2)" />}
@@ -788,15 +795,7 @@ export default function AiProcessPage() {
         <button
           onClick={isListening ? stopListening : startListening}
           disabled={isLimited}
-          style={{
-            width: "40px", height: "40px", minWidth: "40px", borderRadius: "50%",
-            backgroundColor: isListening ? "#ef4444" : "rgba(255,255,255,0.08)",
-            border: isListening ? "2px solid #fca5a5" : "none",
-            cursor: isLimited ? "default" : "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            animation: isListening ? "pulse 1s ease-in-out infinite" : "none",
-            opacity: isLimited ? 0.3 : 1,
-          }}
+          style={{ width: "40px", height: "40px", minWidth: "40px", borderRadius: "50%", backgroundColor: isListening ? "#ef4444" : "rgba(255,255,255,0.08)", border: isListening ? "2px solid #fca5a5" : "none", cursor: isLimited ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, animation: isListening ? "pulse 1s ease-in-out infinite" : "none", opacity: isLimited ? 0.3 : 1 }}
         >
           {isListening ? <MicOff size={16} color="white" /> : <Mic size={16} color="rgba(255,255,255,0.6)" />}
         </button>
@@ -815,27 +814,13 @@ export default function AiProcessPage() {
           }
           disabled={isLimited}
           rows={1}
-          style={{
-            flex: 1,
-            backgroundColor: isListening ? "rgba(239,68,68,0.1)" : isLimited ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.07)",
-            border: isListening ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(255,255,255,0.1)",
-            borderRadius: "14px", padding: "10px 12px",
-            fontSize: "16px", color: isLimited ? "rgba(255,255,255,0.3)" : "white",
-            outline: "none", resize: "none", maxHeight: "70px",
-            overflowY: "auto", boxSizing: "border-box", fontFamily: "inherit",
-          }}
+          style={{ flex: 1, backgroundColor: isListening ? "rgba(239,68,68,0.1)" : isLimited ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.07)", border: isListening ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(255,255,255,0.1)", borderRadius: "14px", padding: "10px 12px", fontSize: "16px", color: isLimited ? "rgba(255,255,255,0.3)" : "white", outline: "none", resize: "none", maxHeight: "70px", overflowY: "auto", boxSizing: "border-box", fontFamily: "inherit" }}
         />
 
         <button
           onClick={() => sendMessage()}
           disabled={!input.trim() || loading || isLimited}
-          style={{
-            width: "40px", height: "40px", minWidth: "40px", borderRadius: "50%",
-            backgroundColor: input.trim() && !loading && !isLimited ? "#3b82f6" : "rgba(255,255,255,0.08)",
-            border: "none",
-            cursor: input.trim() && !loading && !isLimited ? "pointer" : "default",
-            display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-          }}
+          style={{ width: "40px", height: "40px", minWidth: "40px", borderRadius: "50%", backgroundColor: input.trim() && !loading && !isLimited ? "#3b82f6" : "rgba(255,255,255,0.08)", border: "none", cursor: input.trim() && !loading && !isLimited ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
         >
           <Send size={15} color="white" />
         </button>
