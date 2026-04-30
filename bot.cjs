@@ -12,6 +12,7 @@ const {
   doc,
   Timestamp,
   addDoc,
+  deleteDoc,
 } = require('firebase/firestore');
 
 const firebaseConfig = {
@@ -121,8 +122,7 @@ bot.onText(/\/revoke (.+)/, async (msg, match) => {
     bot.sendMessage(msg.chat.id, `✅ Подписка отключена у ${targetId}`);
     try {
       bot.sendMessage(targetId,
-        "❌ Твоя подписка CortexAI была отключена.\n\n" +
-        "Напиши /subscribe для оформления."
+        "❌ Твоя подписка CortexAI была отключена.\n\nНапиши /subscribe для оформления."
       );
     } catch {}
   } catch (err) {
@@ -130,27 +130,23 @@ bot.onText(/\/revoke (.+)/, async (msg, match) => {
   }
 });
 
-// /subscribers — список всех подписчиков
+// /subscribers — список подписчиков
 bot.onText(/\/subscribers/, async (msg) => {
   if (!isAdmin(String(msg.chat.id))) {
     bot.sendMessage(msg.chat.id, "❌ Нет прав.");
     return;
   }
-
   try {
     const subsSnap = await getDocs(collection(db, "subscriptions"));
     const now = new Date();
-
     const activeList = [];
     const expiredList = [];
 
     subsSnap.forEach((subDoc) => {
       const sub = subDoc.data();
       if (!sub.expiresAt) return;
-
       const expiresAt = sub.expiresAt.toDate();
       const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
-
       if (sub.isActive && daysLeft > 0) {
         activeList.push({
           userId: sub.userId,
@@ -202,7 +198,6 @@ bot.onText(/\/stats/, async (msg) => {
     bot.sendMessage(msg.chat.id, "❌ Нет прав.");
     return;
   }
-
   try {
     const [subsSnap, tasksSnap] = await Promise.all([
       getDocs(collection(db, "subscriptions")),
@@ -228,15 +223,13 @@ bot.onText(/\/stats/, async (msg) => {
       }
     });
 
-    const totalTasks = tasksSnap.size;
-
     const response =
       `📈 Статистика CortexAI:\n\n` +
       `👥 Всего пользователей: ${totalSubs}\n` +
       `✅ Активных подписок: ${activeSubs}\n` +
       `   🎁 Подарочных: ${giftSubs}\n` +
       `   💳 Платных: ${paidSubs}\n\n` +
-      `📋 Всего задач в системе: ${totalTasks}\n`;
+      `📋 Всего задач в системе: ${tasksSnap.size}\n`;
 
     bot.sendMessage(msg.chat.id, response);
   } catch (err) {
@@ -247,7 +240,6 @@ bot.onText(/\/stats/, async (msg) => {
 // /help — помощь для админа
 bot.onText(/\/help/, (msg) => {
   if (!isAdmin(String(msg.chat.id))) return;
-
   bot.sendMessage(msg.chat.id,
     `🛠 Команды администратора:\n\n` +
     `/gift [ID] — выдать подписку\n` +
@@ -318,9 +310,7 @@ async function checkReminders() {
 
     for (const documentSnapshot of snapshot.docs) {
       const task = documentSnapshot.data();
-
       try {
-        // Если задача выполнена — не отправляем
         if (task.status === "done") {
           await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
           console.log(`Задача выполнена — пропускаем: ${task.title}`);
@@ -334,7 +324,6 @@ async function checkReminders() {
 
         await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
 
-        // Ежедневная задача — создаём на завтра
         if (task.repeat === "daily" && task.status !== "done") {
           await createNextDailyTask(task);
         }
@@ -360,7 +349,6 @@ async function createNextDailyTask(task) {
     nextDate.setDate(nextDate.getDate() + 1);
     const nextDateStr = nextDate.toISOString().split("T")[0];
 
-    // Проверяем что такой задачи на завтра ещё нет
     const existingQuery = query(
       collection(db, "tasks"),
       where("userId", "==", task.userId),
@@ -417,7 +405,6 @@ async function checkSubscriptions() {
       const expiresAt = sub.expiresAt.toDate();
       const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
 
-      // За 3 дня
       if (daysLeft === 3 && !sub.notified3days) {
         try {
           await bot.sendMessage(sub.userId,
@@ -429,7 +416,6 @@ async function checkSubscriptions() {
         } catch {}
       }
 
-      // За 1 день
       if (daysLeft === 1 && !sub.notified1day) {
         try {
           await bot.sendMessage(sub.userId,
@@ -439,7 +425,6 @@ async function checkSubscriptions() {
         } catch {}
       }
 
-      // Истекла
       if (daysLeft <= 0 && sub.isActive) {
         try {
           await updateDoc(doc(db, "subscriptions", subDoc.id), { isActive: false });
@@ -498,8 +483,140 @@ async function checkBirthdays() {
   }
 }
 
-// ============ ЗАПУСК ПРОВЕРОК ============
+// ============ БЛОК 4: ВЕЧЕРНЯЯ МОТИВАЦИЯ ============
 
-setInterval(checkReminders, 60 * 1000);          // каждую минуту
-setInterval(checkSubscriptions, 60 * 60 * 1000); // каждый час
-setInterval(checkBirthdays, 60 * 60 * 1000);     // каждый час
+async function sendEveningMotivation() {
+  try {
+    const now = new Date();
+    const hour = now.getHours();
+
+    // Отправляем только в 21:00
+    if (hour !== 21) return;
+
+    const todayStr = now.toISOString().split("T")[0];
+
+    const motivations = [
+      "🌟 Каждый шаг вперёд — это победа. Отдохни и завтра снова в бой!",
+      "💪 Ты делаешь больше, чем думаешь. Гордись собой!",
+      "🌙 Хороший вечер — залог продуктивного утра. Отдыхай!",
+      "🎯 Фокус сегодня — результат завтра. Молодец!",
+      "✨ Маленькие победы складываются в большие достижения!",
+      "🌈 Каждый выполненный пункт — это шаг к мечте!",
+      "🏆 Ты справился! Вечер для отдыха и восстановления.",
+      "🌿 Отдых — это тоже часть продуктивности. Расслабься!",
+      "⭐ Сегодня ты был лучше вчерашнего себя. Это и есть прогресс!",
+      "🎵 Хороший вечер — это заслуженная награда за труд!",
+    ];
+
+    const usersSnap = await getDocs(collection(db, "users"));
+
+    for (const userDoc of usersSnap.docs) {
+      const userId = userDoc.id;
+      try {
+        const tasksSnap = await getDocs(
+          collection(db, "users", userId, "tasks")
+        );
+
+        let doneToday = 0;
+        tasksSnap.forEach((d) => {
+          const data = d.data();
+          if (
+            data.status === "done" &&
+            data.completedAt &&
+            data.completedAt.startsWith(todayStr)
+          ) {
+            doneToday++;
+          }
+        });
+
+        if (doneToday > 0) {
+          const motivation = motivations[Math.floor(Math.random() * motivations.length)];
+          const taskWord =
+            doneToday === 1 ? "задачу" :
+            doneToday < 5 ? "задачи" : "задач";
+
+          await bot.sendMessage(
+            userId,
+            `🌙 Добрый вечер!\n\n` +
+            `Сегодня вы выполнили ${doneToday} ${taskWord}! 🎉\n\n` +
+            `${motivation}`
+          );
+        }
+      } catch {}
+    }
+  } catch (err) {
+    console.log("Ошибка вечерней мотивации:", err.message);
+  }
+}
+
+// ============ БЛОК 3: ОЧИСТКА СТАРЫХ ЗАДАЧ ============
+
+async function cleanupOldDoneTasks() {
+  try {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    const usersSnap = await getDocs(collection(db, "users"));
+
+    for (const userDoc of usersSnap.docs) {
+      const userId = userDoc.id;
+      try {
+        const tasksSnap = await getDocs(
+          collection(db, "users", userId, "tasks")
+        );
+
+        for (const taskDoc of tasksSnap.docs) {
+          const data = taskDoc.data();
+          if (data.status === "done" && data.completedAt) {
+            const completedAt = new Date(data.completedAt);
+            if (completedAt < yesterday) {
+              try {
+                await deleteDoc(doc(db, "users", userId, "tasks", taskDoc.id));
+                console.log(`🗑 Удалена старая задача: ${data.title}`);
+              } catch {}
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // Очищаем общую коллекцию tasks
+    try {
+      const allTasksSnap = await getDocs(
+        query(collection(db, "tasks"), where("isSent", "==", true))
+      );
+      for (const taskDoc of allTasksSnap.docs) {
+        const data = taskDoc.data();
+        if (data.status === "done" && data.completedAt) {
+          const completedAt = new Date(data.completedAt);
+          if (completedAt < yesterday) {
+            try {
+              await deleteDoc(doc(db, "tasks", taskDoc.id));
+            } catch {}
+          }
+        }
+        // Удаляем старые отправленные задачи без completedAt
+        if (data.isSent === true && data.reminderAt) {
+          const reminderAt = data.reminderAt.toDate();
+          if (reminderAt < yesterday) {
+            try {
+              await deleteDoc(doc(db, "tasks", taskDoc.id));
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+
+    console.log("✅ Очистка старых задач завершена");
+  } catch (err) {
+    console.log("Ошибка очистки задач:", err.message);
+  }
+}
+
+// ============ ЗАПУСК ВСЕХ ПРОВЕРОК ============
+
+setInterval(checkReminders, 60 * 1000);              // каждую минуту
+setInterval(checkSubscriptions, 60 * 60 * 1000);     // каждый час
+setInterval(checkBirthdays, 60 * 60 * 1000);         // каждый час
+setInterval(sendEveningMotivation, 60 * 1000);        // каждую минуту проверяем время (21:00)
+setInterval(cleanupOldDoneTasks, 6 * 60 * 60 * 1000); // каждые 6 часов
