@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import TaskCard from "@/components/TaskCard";
 import { useTaskStore } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
-import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 
 export default function HomePage() {
   const language = useI18nStore((state) => state.language);
@@ -12,7 +12,6 @@ export default function HomePage() {
   const categories = useTaskStore((state) => state.categories);
   const categoryEvents = useTaskStore((state) => state.categoryEvents);
   const deleteCategoryEvent = useTaskStore((state) => state.deleteCategoryEvent);
-  const isDataLoaded = useTaskStore((state) => state.isDataLoaded);
   const ru = language === "ru";
 
   const todayStr = new Date().toISOString().split("T")[0];
@@ -29,44 +28,58 @@ export default function HomePage() {
   const todayBirthdays = birthdays.filter((b) => b.date === `${todayMonth}-${todayDay}`);
   const tomorrowBirthdays = birthdays.filter((b) => b.date === `${tomorrowMonth}-${tomorrowDay}`);
 
+  // Все активные задачи
   const activeTasks = useMemo(() => tasks.filter((t) => t.status !== "done"), [tasks]);
-  const todayTasks = useMemo(() => tasks.filter((t) => t.dueDate?.startsWith(todayStr) && t.status !== "done"), [tasks, todayStr]);
-  const tomorrowTasks = useMemo(() => tasks.filter((t) => t.dueDate?.startsWith(tomorrowStr) && t.status !== "done"), [tasks, tomorrowStr]);
-  const otherTasks = useMemo(() => activeTasks.filter((t) => t.dueDate && !t.dueDate.startsWith(todayStr) && !t.dueDate.startsWith(tomorrowStr)), [activeTasks, todayStr, tomorrowStr]);
+
+  // БЛОК 1: Ежедневные задачи БЕЗ даты — отдельный список
+  const dailyNoDate = useMemo(() =>
+    activeTasks.filter((t) => t.repeat === "daily" && !t.dueDate),
+    [activeTasks]
+  );
+
+  // Задачи С датой
+  const tasksWithDate = useMemo(() =>
+    activeTasks.filter((t) => !(t.repeat === "daily" && !t.dueDate)),
+    [activeTasks]
+  );
+
+  const todayTasks = useMemo(() =>
+    tasksWithDate.filter((t) => t.dueDate?.startsWith(todayStr)),
+    [tasksWithDate, todayStr]
+  );
+
+  const tomorrowTasks = useMemo(() =>
+    tasksWithDate.filter((t) => t.dueDate?.startsWith(tomorrowStr)),
+    [tasksWithDate, tomorrowStr]
+  );
+
+  const otherTasks = useMemo(() =>
+    tasksWithDate.filter((t) =>
+      t.dueDate &&
+      !t.dueDate.startsWith(todayStr) &&
+      !t.dueDate.startsWith(tomorrowStr)
+    ),
+    [tasksWithDate, todayStr, tomorrowStr]
+  );
+
   const doneTasks = useMemo(() => tasks.filter((t) => t.status === "done"), [tasks]);
 
   const [showDone, setShowDone] = useState(false);
+  const [showDailyNoDate, setShowDailyNoDate] = useState(true);
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
-  // Данные для активного раздела
   const activeSectionData = useMemo(() => {
     if (!activeSection) return null;
     if (activeSection === "birthdays") {
-      return birthdays.map((b) => ({
-        id: b.id, title: b.name,
-        subtitle: b.date, color: b.color, icon: "🎂",
-        type: "birthday" as const,
-      }));
+      return birthdays.map((b) => ({ id: b.id, title: b.name, subtitle: b.date, color: b.color, icon: "🎂", type: "birthday" as const }));
     }
     if (activeSection === "vacations") {
-      return vacations.map((v) => ({
-        id: v.id, title: v.title,
-        subtitle: `${v.startDate} — ${v.endDate}`,
-        color: v.color, icon: "🌴",
-        type: "vacation" as const,
-      }));
+      return vacations.map((v) => ({ id: v.id, title: v.title, subtitle: `${v.startDate} — ${v.endDate}`, color: v.color, icon: "🌴", type: "vacation" as const }));
     }
-    // Кастомные категории
     const events = categoryEvents.filter((e) => e.categoryId === activeSection);
     return events.map((e) => {
       const cat = categories.find((c) => c.id === e.categoryId);
-      return {
-        id: e.id, title: e.title,
-        subtitle: e.endDate ? `${e.date} — ${e.endDate}` : e.date,
-        color: e.color || cat?.color || "#3b82f6",
-        icon: cat?.icon || "📁",
-        type: "event" as const,
-      };
+      return { id: e.id, title: e.title, subtitle: e.endDate ? `${e.date} — ${e.endDate}` : e.date, color: e.color || cat?.color || "#3b82f6", icon: cat?.icon || "📁", type: "event" as const };
     });
   }, [activeSection, birthdays, vacations, categoryEvents, categories]);
 
@@ -85,12 +98,12 @@ export default function HomePage() {
           {activeTasks.length === 0
             ? (ru ? "Все задачи выполнены! 🎉" : "All tasks done! 🎉")
             : todayTasks.length > 0
-            ? ru ? `${todayTasks.length} на сегодня` : `${todayTasks.length} for today`
-            : ru ? "На сегодня задач нет" : "No tasks for today"}
+              ? ru ? `${todayTasks.length} на сегодня` : `${todayTasks.length} for today`
+              : ru ? "На сегодня задач нет" : "No tasks for today"}
         </p>
       </div>
 
-      {/* Уведомления о ДР */}
+      {/* Дни рождения */}
       {todayBirthdays.length > 0 && (
         <div style={{ backgroundColor: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "14px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
           <span style={{ fontSize: "20px" }}>🎂</span>
@@ -120,7 +133,6 @@ export default function HomePage() {
           <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "4px" }}>
             {categories.map((cat) => {
               const isActive = activeSection === cat.id;
-              // Считаем количество элементов в разделе
               let count = 0;
               if (cat.id === "birthdays") count = birthdays.length;
               else if (cat.id === "vacations") count = vacations.length;
@@ -152,7 +164,6 @@ export default function HomePage() {
             })}
           </div>
 
-          {/* Содержимое активного раздела */}
           {activeSection && activeSectionData !== null && (
             <div style={{ marginTop: "10px", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: "14px", padding: "12px", border: "1px solid rgba(255,255,255,0.07)" }}>
               {activeSectionData.length === 0 ? (
@@ -169,16 +180,45 @@ export default function HomePage() {
                         <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{item.subtitle}</p>
                       </div>
                       <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: item.color, flexShrink: 0 }} />
-                      {item.type === "event" && (
-                        <button onClick={() => deleteCategoryEvent(item.id)} style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}>
-                          <Trash2 size={13} color="rgba(239,68,68,0.6)" />
-                        </button>
-                      )}
                     </div>
                   ))}
                 </div>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* БЛОК 1: Ежедневные задачи без даты */}
+      {dailyNoDate.length > 0 && (
+        <div style={{ marginBottom: "20px" }}>
+          <button
+            onClick={() => setShowDailyNoDate(!showDailyNoDate)}
+            style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", padding: 0, width: "100%" }}
+          >
+            {showDailyNoDate ? <ChevronDown size={14} color="rgba(255,165,0,0.7)" /> : <ChevronRight size={14} color="rgba(255,165,0,0.7)" />}
+            <RefreshCw size={13} color="rgba(255,165,0,0.7)" />
+            <span style={{ fontSize: "14px", fontWeight: 600, color: "rgba(255,165,0,0.8)" }}>
+              {ru ? "Ежедневные (без даты)" : "Daily (no date)"}
+            </span>
+            <span style={{ fontSize: "12px", color: "rgba(255,165,0,0.4)", fontWeight: 400 }}>
+              ({dailyNoDate.length})
+            </span>
+          </button>
+
+          {showDailyNoDate && (
+            <>
+              <div style={{ backgroundColor: "rgba(255,165,0,0.08)", border: "1px solid rgba(255,165,0,0.2)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px" }}>
+                <p style={{ fontSize: "11px", color: "rgba(255,165,0,0.7)", margin: 0 }}>
+                  {ru
+                    ? "ℹ️ Эти задачи повторяются каждый день без конкретного времени. Удали ненужные или добавь дату."
+                    : "ℹ️ These tasks repeat daily without a specific time. Delete unnecessary ones or add a date."}
+                </p>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {dailyNoDate.map((task) => <TaskCard key={task.id} task={task} />)}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -203,7 +243,10 @@ export default function HomePage() {
       {/* Выполненные */}
       {doneTasks.length > 0 && (
         <div style={{ marginBottom: "16px" }}>
-          <button onClick={() => setShowDone(!showDone)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", padding: 0 }}>
+          <button
+            onClick={() => setShowDone(!showDone)}
+            style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", padding: 0 }}
+          >
             {showDone ? <ChevronDown size={14} color="rgba(255,255,255,0.35)" /> : <ChevronRight size={14} color="rgba(255,255,255,0.35)" />}
             <span style={{ fontSize: "14px", fontWeight: 600, color: "rgba(255,255,255,0.4)" }}>
               ✅ {ru ? "Выполненные" : "Completed"}{" "}
