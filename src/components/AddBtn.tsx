@@ -15,6 +15,9 @@ const priorityOptions = [
   { value: "high" as TaskPriority, emoji: "🔴" },
 ];
 
+const QUICK_TEMPLATES_RU = ["Позвонить", "Встреча", "Купить", "Написать", "Оплатить"];
+const QUICK_TEMPLATES_EN = ["Call", "Meeting", "Buy", "Write", "Pay"];
+
 export default function AddBtn() {
   const language = useI18nStore((state) => state.language);
   const addTask = useTaskStore((state) => state.addTask);
@@ -34,15 +37,10 @@ export default function AddBtn() {
   const savingRef = useRef(false);
 
   const resetForm = () => {
-    setTitle("");
-    setDate("");
-    setTime("");
-    setPriority("medium");
-    setRepeat(false);
-    setStep(0);
-    setTaskType("task");
-    setSaving(false);
-    setShoppingItems([""]);
+    setTitle(""); setDate(""); setTime("");
+    setPriority("medium"); setRepeat(false);
+    setStep(0); setTaskType("task");
+    setSaving(false); setShoppingItems([""]);
     savingRef.current = false;
   };
 
@@ -112,9 +110,7 @@ export default function AddBtn() {
           ? `🛒 ${ru ? "Список покупок" : "Shopping list"}`
           : title.trim(),
         description: taskType === "shopping" ? validItems.join("\n") : "",
-        dueDate,
-        priority,
-        status: "todo",
+        dueDate, priority, status: "todo",
         isAiCreated: false,
         repeat: repeat ? "daily" : "none",
         type: taskType,
@@ -133,15 +129,7 @@ export default function AddBtn() {
   if (!open) {
     return (
       <button
-        style={{
-          position: "fixed", bottom: "90px", right: "16px", zIndex: 40,
-          width: "56px", height: "56px", borderRadius: "50%",
-          backgroundColor: "#3b82f6", color: "white", border: "none",
-          cursor: "pointer", display: "flex", alignItems: "center",
-          justifyContent: "center",
-          boxShadow: "0 4px 20px rgba(59,130,246,0.5)",
-          WebkitTapHighlightColor: "transparent",
-        }}
+        style={{ position: "fixed", bottom: "90px", right: "16px", zIndex: 40, width: "56px", height: "56px", borderRadius: "50%", backgroundColor: "#3b82f6", color: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 20px rgba(59,130,246,0.5)", WebkitTapHighlightColor: "transparent" }}
         onClick={() => { triggerHaptic("light"); setOpen(true); }}
       >
         <Plus size={24} />
@@ -151,51 +139,25 @@ export default function AddBtn() {
 
   return (
     <div
-      style={{
-        position: "fixed", inset: 0, zIndex: 50,
-        backgroundColor: "rgba(0,0,0,0.6)",
-        display: "flex", alignItems: "center",
-        justifyContent: "center", padding: "16px",
-      }}
+      style={{ position: "fixed", inset: 0, zIndex: 50, backgroundColor: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
       onClick={handleClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "100%", maxWidth: "320px",
-          backgroundColor: "#1e293b",
-          borderRadius: "20px",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          overflow: "hidden",
-        }}
+        style={{ width: "100%", maxWidth: "320px", backgroundColor: "#1e293b", borderRadius: "20px", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}
       >
-        {/* Контент с padding */}
         <div style={{ padding: "20px" }}>
 
           {/* Индикатор шагов */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
             <div style={{ display: "flex", gap: "4px" }}>
               {[0, 1, 2].map((s) => (
-                <div key={s} style={{
-                  height: "3px", width: "20px", borderRadius: "2px",
-                  backgroundColor: step >= s ? "#3b82f6" : "rgba(255,255,255,0.15)",
-                  transition: "background-color 0.3s ease",
-                }} />
+                <div key={s} style={{ height: "3px", width: "20px", borderRadius: "2px", backgroundColor: step >= s ? "#3b82f6" : "rgba(255,255,255,0.15)", transition: "background-color 0.3s ease" }} />
               ))}
             </div>
             {step > 0 && (
-              <button
-                onClick={handleBack}
-                style={{
-                  background: "none", border: "none", cursor: "pointer",
-                  color: "rgba(255,255,255,0.4)", fontSize: "13px",
-                  display: "flex", alignItems: "center", gap: "4px",
-                  padding: 0,
-                }}
-              >
-                <ArrowLeft size={14} />
-                {ru ? "Назад" : "Back"}
+              <button onClick={handleBack} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.4)", fontSize: "13px", display: "flex", alignItems: "center", gap: "4px", padding: 0 }}>
+                <ArrowLeft size={14} /> {ru ? "Назад" : "Back"}
               </button>
             )}
           </div>
@@ -203,88 +165,62 @@ export default function AddBtn() {
           {/* ШАГ 0 — Выбор типа */}
           {step === 0 && (
             <div>
-              <p style={{ fontSize: "16px", fontWeight: 700, color: "white", marginBottom: "16px", margin: "0 0 16px 0" }}>
+              <p style={{ fontSize: "16px", fontWeight: 700, color: "white", margin: "0 0 16px 0" }}>
                 {ru ? "Что создаём?" : "What to create?"}
               </p>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                <button
-                  onClick={() => handleSelectType("task")}
-                  style={{
-                    height: "90px", borderRadius: "16px",
-                    border: "1px solid rgba(59,130,246,0.3)",
-                    backgroundColor: "rgba(59,130,246,0.1)",
-                    cursor: "pointer", display: "flex",
-                    flexDirection: "column", alignItems: "center",
-                    justifyContent: "center", gap: "8px",
-                  }}
-                >
+                <button onClick={() => handleSelectType("task")} style={{ height: "90px", borderRadius: "16px", border: "1px solid rgba(59,130,246,0.3)", backgroundColor: "rgba(59,130,246,0.1)", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "8px" }}>
                   <CheckSquare size={28} color="#3b82f6" />
-                  <span style={{ fontSize: "13px", fontWeight: 600, color: "#93c5fd" }}>
-                    {ru ? "Задача" : "Task"}
-                  </span>
+                  <span style={{ fontSize: "13px", fontWeight: 600, color: "#93c5fd" }}>{ru ? "Задача" : "Task"}</span>
                 </button>
-
-                <button
-                  onClick={() => handleSelectType("shopping")}
-                  style={{
-                    height: "90px", borderRadius: "16px",
-                    border: "1px solid rgba(34,197,94,0.3)",
-                    backgroundColor: "rgba(34,197,94,0.1)",
-                    cursor: "pointer", display: "flex",
-                    flexDirection: "column", alignItems: "center",
-                    justifyContent: "center", gap: "8px",
-                  }}
-                >
+                <button onClick={() => handleSelectType("shopping")} style={{ height: "90px", borderRadius: "16px", border: "1px solid rgba(34,197,94,0.3)", backgroundColor: "rgba(34,197,94,0.1)", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "8px" }}>
                   <ShoppingCart size={28} color="#22c55e" />
-                  <span style={{ fontSize: "13px", fontWeight: 600, color: "#86efac" }}>
-                    {ru ? "Покупки" : "Shopping"}
-                  </span>
+                  <span style={{ fontSize: "13px", fontWeight: 600, color: "#86efac" }}>{ru ? "Покупки" : "Shopping"}</span>
                 </button>
               </div>
             </div>
           )}
 
-          {/* ШАГ 1 — Название или список покупок */}
+          {/* ШАГ 1 — Название */}
           {step === 1 && (
             <div>
               <p style={{ fontSize: "16px", fontWeight: 700, color: "white", margin: "0 0 14px 0" }}>
-                {taskType === "shopping"
-                  ? (ru ? "🛒 Что купить?" : "🛒 What to buy?")
-                  : (ru ? "Что нужно сделать?" : "What to do?")}
+                {taskType === "shopping" ? (ru ? "🛒 Что купить?" : "🛒 What to buy?") : (ru ? "Что нужно сделать?" : "What to do?")}
               </p>
 
               {taskType === "task" ? (
                 <>
+                  {/* Быстрые шаблоны */}
+                  <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 6px 0" }}>
+                    {ru ? "Быстрые шаблоны:" : "Quick templates:"}
+                  </p>
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "10px" }}>
+                    {(ru ? QUICK_TEMPLATES_RU : QUICK_TEMPLATES_EN).map((template) => (
+                      <button
+                        key={template}
+                        onClick={() => setTitle(template)}
+                        style={{ padding: "4px 10px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: title === template ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: title === template ? "#60a5fa" : "rgba(255,255,255,0.6)", fontSize: "12px", cursor: "pointer", transition: "all 0.15s" }}
+                      >
+                        {template}
+                      </button>
+                    ))}
+                  </div>
+
                   <input
                     autoFocus
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleNext()}
                     placeholder={ru ? "Название задачи..." : "Task title..."}
-                    style={inputStyle}
+                    style={{ display: "block", width: "100%", boxSizing: "border-box" as const, height: "44px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "14px", paddingRight: "14px", fontSize: "15px", color: "white", outline: "none", marginBottom: "12px", fontFamily: "inherit" }}
                   />
 
-                  <p style={labelStyle}>{ru ? "Приоритет" : "Priority"}</p>
+                  <p style={{ fontSize: "12px", fontWeight: 500, color: "rgba(255,255,255,0.4)", marginBottom: "8px" }}>
+                    {ru ? "Приоритет" : "Priority"}
+                  </p>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "16px" }}>
                     {priorityOptions.map(({ value, emoji }) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setPriority(value)}
-                        style={{
-                          height: "38px", borderRadius: "10px",
-                          border: priority === value
-                            ? "1px solid #3b82f6"
-                            : "1px solid rgba(255,255,255,0.08)",
-                          fontSize: "12px", fontWeight: 500, cursor: "pointer",
-                          backgroundColor: priority === value
-                            ? "rgba(59,130,246,0.2)"
-                            : "rgba(255,255,255,0.05)",
-                          color: priority === value
-                            ? "#60a5fa"
-                            : "rgba(255,255,255,0.5)",
-                        }}
-                      >
+                      <button key={value} type="button" onClick={() => setPriority(value)} style={{ height: "38px", borderRadius: "10px", border: priority === value ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.08)", fontSize: "12px", fontWeight: 500, cursor: "pointer", backgroundColor: priority === value ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: priority === value ? "#60a5fa" : "rgba(255,255,255,0.5)", transition: "all 0.15s" }}>
                         {emoji} {t(language, value)}
                       </button>
                     ))}
@@ -292,95 +228,37 @@ export default function AddBtn() {
                 </>
               ) : (
                 <>
-                  <div
-                    style={{
-                      maxHeight: "200px", overflowY: "auto",
-                      marginBottom: "10px",
-                    }}
-                  >
+                  <div style={{ maxHeight: "200px", overflowY: "auto", marginBottom: "10px" }}>
                     {shoppingItems.map((item, idx) => (
                       <div key={idx} style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
                         <input
                           autoFocus={idx === 0}
                           value={item}
-                          onChange={(e) => {
-                            const updated = [...shoppingItems];
-                            updated[idx] = e.target.value;
-                            setShoppingItems(updated);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              setShoppingItems([...shoppingItems, ""]);
-                            }
-                          }}
+                          onChange={(e) => { const updated = [...shoppingItems]; updated[idx] = e.target.value; setShoppingItems(updated); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setShoppingItems([...shoppingItems, ""]); } }}
                           placeholder={ru ? `Товар ${idx + 1}...` : `Item ${idx + 1}...`}
-                          style={{
-                            ...inputStyle,
-                            marginBottom: 0,
-                            flex: 1,
-                            boxSizing: "border-box" as const,
-                          }}
+                          style={{ flex: 1, height: "42px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "12px", paddingRight: "12px", fontSize: "14px", color: "white", outline: "none", fontFamily: "inherit", boxSizing: "border-box" as const }}
                         />
                         {shoppingItems.length > 1 && (
-                          <button
-                            onClick={() => setShoppingItems(shoppingItems.filter((_, i) => i !== idx))}
-                            style={{
-                              width: "44px", height: "44px",
-                              borderRadius: "10px", border: "none",
-                              backgroundColor: "rgba(239,68,68,0.1)",
-                              color: "#ef4444", cursor: "pointer",
-                              fontSize: "18px", flexShrink: 0,
-                              display: "flex", alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            ×
-                          </button>
+                          <button onClick={() => setShoppingItems(shoppingItems.filter((_, i) => i !== idx))} style={{ width: "42px", height: "42px", borderRadius: "10px", border: "none", backgroundColor: "rgba(239,68,68,0.1)", color: "#ef4444", cursor: "pointer", fontSize: "18px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
                         )}
                       </div>
                     ))}
                   </div>
-
-                  <button
-                    onClick={() => setShoppingItems([...shoppingItems, ""])}
-                    style={{
-                      width: "100%", height: "38px", borderRadius: "10px",
-                      border: "1px dashed rgba(255,255,255,0.15)",
-                      backgroundColor: "transparent",
-                      color: "rgba(255,255,255,0.4)",
-                      cursor: "pointer", fontSize: "13px",
-                      marginBottom: "14px",
-                      boxSizing: "border-box" as const,
-                    }}
-                  >
+                  <button onClick={() => setShoppingItems([...shoppingItems, ""])} style={{ width: "100%", height: "36px", borderRadius: "10px", border: "1px dashed rgba(255,255,255,0.15)", backgroundColor: "transparent", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: "13px", marginBottom: "12px", boxSizing: "border-box" as const }}>
                     + {ru ? "Добавить товар" : "Add item"}
                   </button>
                 </>
               )}
 
               <div style={{ display: "flex", gap: "8px" }}>
-                <button type="button" onClick={handleClose} style={cancelBtnStyle}>
+                <button type="button" onClick={handleClose} style={{ flex: 1, height: "44px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "transparent", fontSize: "14px", fontWeight: 500, color: "rgba(255,255,255,0.5)", cursor: "pointer" }}>
                   {ru ? "Отмена" : "Cancel"}
                 </button>
                 <button
-                  type="button"
-                  onClick={handleNext}
-                  disabled={
-                    taskType === "task"
-                      ? !title.trim()
-                      : !shoppingItems.some((i) => i.trim())
-                  }
-                  style={{
-                    flex: 1, height: "44px", borderRadius: "12px",
-                    border: "none", fontSize: "14px", fontWeight: 600,
-                    color: "white", cursor: "pointer",
-                    backgroundColor:
-                      (taskType === "task" ? title.trim() : shoppingItems.some((i) => i.trim()))
-                        ? "#3b82f6"
-                        : "rgba(255,255,255,0.1)",
-                    transition: "background-color 0.2s ease",
-                  }}
+                  type="button" onClick={handleNext}
+                  disabled={taskType === "task" ? !title.trim() : !shoppingItems.some((i) => i.trim())}
+                  style={{ flex: 1, height: "44px", borderRadius: "12px", border: "none", fontSize: "14px", fontWeight: 600, color: "white", cursor: "pointer", backgroundColor: (taskType === "task" ? title.trim() : shoppingItems.some((i) => i.trim())) ? "#3b82f6" : "rgba(255,255,255,0.1)", transition: "background-color 0.2s" }}
                 >
                   {ru ? "Далее →" : "Next →"}
                 </button>
@@ -388,90 +266,33 @@ export default function AddBtn() {
             </div>
           )}
 
-          {/* ШАГ 2 — Дата, время, повтор */}
+          {/* ШАГ 2 — Дата и время */}
           {step === 2 && (
             <div>
               <p style={{ fontSize: "16px", fontWeight: 700, color: "white", margin: "0 0 14px 0" }}>
                 {ru ? "Когда напомнить?" : "When to remind?"}
               </p>
 
-              <p style={labelStyle}>{ru ? "Дата" : "Date"}</p>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                style={{
-                  ...inputStyle,
-                  colorScheme: "dark",
-                  WebkitAppearance: "none" as any,
-                  appearance: "none" as any,
-                }}
-              />
+              <p style={{ fontSize: "12px", fontWeight: 500, color: "rgba(255,255,255,0.4)", marginBottom: "6px" }}>{ru ? "Дата" : "Date"}</p>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ display: "block", width: "100%", boxSizing: "border-box" as const, height: "44px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "14px", paddingRight: "14px", fontSize: "15px", color: "white", outline: "none", marginBottom: "12px", fontFamily: "inherit", colorScheme: "dark", appearance: "none" as any, WebkitAppearance: "none" as any }} />
 
-              <p style={labelStyle}>{ru ? "Время" : "Time"}</p>
-              <input
-                type="time"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
-                style={{
-                  ...inputStyle,
-                  colorScheme: "dark",
-                  WebkitAppearance: "none" as any,
-                  appearance: "none" as any,
-                }}
-              />
+              <p style={{ fontSize: "12px", fontWeight: 500, color: "rgba(255,255,255,0.4)", marginBottom: "6px" }}>{ru ? "Время" : "Time"}</p>
+              <input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={{ display: "block", width: "100%", boxSizing: "border-box" as const, height: "44px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "14px", paddingRight: "14px", fontSize: "15px", color: "white", outline: "none", marginBottom: "12px", fontFamily: "inherit", colorScheme: "dark", appearance: "none" as any, WebkitAppearance: "none" as any }} />
 
-              {/* Повтор */}
-              <div style={{
-                display: "flex", alignItems: "center",
-                justifyContent: "space-between",
-                backgroundColor: "rgba(255,255,255,0.05)",
-                borderRadius: "12px", padding: "11px 14px",
-                marginBottom: "16px",
-                border: "1px solid rgba(255,255,255,0.08)",
-                boxSizing: "border-box" as const,
-              }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", backgroundColor: "rgba(255,255,255,0.05)", borderRadius: "12px", padding: "12px 14px", marginBottom: "16px", border: "1px solid rgba(255,255,255,0.08)", boxSizing: "border-box" as const }}>
                 <p style={{ fontSize: "14px", fontWeight: 500, color: "rgba(255,255,255,0.8)", margin: 0 }}>
                   🔁 {ru ? "Каждый день" : "Daily"}
                 </p>
-                <div
-                  onClick={() => setRepeat(!repeat)}
-                  style={{
-                    position: "relative", width: "44px", minWidth: "44px",
-                    height: "24px", borderRadius: "12px",
-                    backgroundColor: repeat ? "#3b82f6" : "rgba(255,255,255,0.15)",
-                    cursor: "pointer", transition: "background-color 0.2s ease",
-                    flexShrink: 0,
-                  }}
-                >
-                  <div style={{
-                    position: "absolute", top: "2px",
-                    left: repeat ? "22px" : "2px",
-                    width: "20px", height: "20px",
-                    borderRadius: "50%", backgroundColor: "white",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                    transition: "left 0.2s ease",
-                  }} />
+                <div onClick={() => setRepeat(!repeat)} style={{ position: "relative", width: "44px", minWidth: "44px", height: "24px", borderRadius: "12px", backgroundColor: repeat ? "#3b82f6" : "rgba(255,255,255,0.15)", cursor: "pointer", transition: "background-color 0.2s ease", flexShrink: 0 }}>
+                  <div style={{ position: "absolute", top: "2px", left: repeat ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", backgroundColor: "white", boxShadow: "0 1px 3px rgba(0,0,0,0.3)", transition: "left 0.2s ease" }} />
                 </div>
               </div>
 
               <div style={{ display: "flex", gap: "8px" }}>
-                <button type="button" onClick={handleClose} style={cancelBtnStyle}>
+                <button type="button" onClick={handleClose} style={{ flex: 1, height: "44px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "transparent", fontSize: "14px", fontWeight: 500, color: "rgba(255,255,255,0.5)", cursor: "pointer" }}>
                   {ru ? "Отмена" : "Cancel"}
                 </button>
-                <button
-                  type="button"
-                  onClick={onSave}
-                  disabled={saving}
-                  style={{
-                    flex: 1, height: "44px", borderRadius: "12px",
-                    border: "none",
-                    backgroundColor: saving ? "rgba(59,130,246,0.5)" : "#3b82f6",
-                    fontSize: "14px", fontWeight: 600,
-                    color: "white", cursor: saving ? "default" : "pointer",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}
-                >
+                <button type="button" onClick={onSave} disabled={saving} style={{ flex: 1, height: "44px", borderRadius: "12px", border: "none", backgroundColor: saving ? "rgba(59,130,246,0.5)" : "#3b82f6", fontSize: "14px", fontWeight: 600, color: "white", cursor: saving ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   {saving ? (ru ? "Сохраняю..." : "Saving...") : (ru ? "Создать ✅" : "Create ✅")}
                 </button>
               </div>
@@ -482,40 +303,3 @@ export default function AddBtn() {
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  display: "block",
-  width: "100%",
-  boxSizing: "border-box" as const,
-  height: "44px",
-  borderRadius: "12px",
-  border: "1px solid rgba(255,255,255,0.1)",
-  backgroundColor: "rgba(255,255,255,0.07)",
-  paddingLeft: "14px",
-  paddingRight: "14px",
-  fontSize: "15px",
-  color: "white",
-  outline: "none",
-  marginBottom: "12px",
-  fontFamily: "inherit",
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: "12px",
-  fontWeight: 500,
-  color: "rgba(255,255,255,0.4)",
-  marginBottom: "6px",
-  display: "block",
-};
-
-const cancelBtnStyle: React.CSSProperties = {
-  flex: 1,
-  height: "44px",
-  borderRadius: "12px",
-  border: "1px solid rgba(255,255,255,0.1)",
-  backgroundColor: "transparent",
-  fontSize: "14px",
-  fontWeight: 500,
-  color: "rgba(255,255,255,0.5)",
-  cursor: "pointer",
-};
