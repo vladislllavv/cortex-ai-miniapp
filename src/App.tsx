@@ -44,6 +44,186 @@ export default function App() {
     };
 
     window.addEventListener("resize", handleResize, { passive: true });
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      clearTimeout(resizeTimer);
+    };
+  }, []);
+
+  const tabs = [
+    { id: "home" as Tab, icon: Home, label: ru ? "Главная" : "Home" },
+    { id: "calendar" as Tab, icon: Calendar, label: ru ? "Календарь" : "Calendar" },
+    { id: "ai" as Tab, icon: Bot, label: "AI" },
+    { id: "settings" as Tab, icon: Settings, label: ru ? "Настройки" : "Settings" },
+  ];
+
+  return (
+    <>
+      <style>{`
+        * {
+          margin: 0; padding: 0;
+          box-sizing: border-box;
+          -webkit-tap-highlight-color: transparent;
+        }
+        html {
+          height: 100%;
+          overflow: hidden;
+          background: #0f172a;
+        }
+        body {
+          height: 100%;
+          overflow: hidden;
+          background: #0f172a;
+          position: fixed;
+          width: 100%;
+          top: 0;
+          left: 0;
+        }
+        #root {
+          height: 100%;
+          overflow: hidden;
+        }
+        input, textarea, select {
+          font-size: 16px !important;
+        }
+        @keyframes pulse-dot {
+          0%, 100% { opacity: 0.4; transform: scale(0.8); }
+          50% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); opacity: 0.4; }
+          50% { transform: translateY(-4px); opacity: 1; }
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
+        textarea::placeholder { color: rgba(255,255,255,0.3); }
+        input::placeholder { color: rgba(255,255,255,0.3); }
+        ::-webkit-scrollbar { width: 0; height: 0; }
+      `}</style>
+
+      <div
+        style={{
+          position: "fixed",
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: "#0f172a",
+          color: "white",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Основной контент */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            overflowX: "hidden",
+            WebkitOverflowScrolling: "touch" as any,
+            paddingBottom: "68px",
+            minHeight: 0,
+          }}
+        >
+          <div
+            style={{
+              padding: "12px 16px 16px 16px",
+              maxWidth: "480px",
+              margin: "0 auto",
+              width: "100%",
+              boxSizing: "border-box",
+            }}
+          >
+            {tab === "home" && <HomePage />}
+            {tab === "calendar" && <CalendarPage />}
+            {tab === "ai" && <AiProcessPage />}
+            {tab === "settings" && <SettingsPage />}
+          </div>
+        </div>
+
+        {/* Кнопка + только на главной */}
+        {tab === "home" && <AddBtn />}
+
+        {/* Нижняя навигация */}
+        <div
+          style={{
+            position: "fixed",
+            bottom: 0, left: 0, right: 0,
+            height: "68px",
+            backgroundColor: "rgba(10,15,30,0.98)",
+            borderTop: "1px solid rgba(255,255,255,0.07)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            zIndex: 100,
+            transform: "translateZ(0)",
+            willChange: "transform",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-around",
+              alignItems: "center",
+              height: "100%",
+              maxWidth: "480px",
+              margin: "0 auto",
+              paddingBottom: "env(safe-area-inset-bottom, 0px)",
+            }}
+          >
+            {tabs.map(({ id, icon: Icon, label }) => {
+              const isActive = tab === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setTab(id)}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "3px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "6px 16px",
+                    WebkitTapHighlightColor: "transparent",
+                    transition: "opacity 0.15s ease",
+                  }}
+                >
+                  <Icon
+                    size={22}
+                    color={isActive ? "#3b82f6" : "rgba(255,255,255,0.35)"}
+                    strokeWidth={isActive ? 2.5 : 1.8}
+                  />
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: isActive ? 600 : 400,
+                      color: isActive ? "#3b82f6" : "rgba(255,255,255,0.35)",
+                      transition: "color 0.15s ease",
+                    }}
+                  >
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+    fixHeight();
+
+    let resizeTimer: ReturnType<typeof setTimeout>;
+    const handleResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(fixHeight, 150);
+    };
+
+    window.addEventListener("resize", handleResize, { passive: true });
     return () => {
       window.removeEventListener("resize", handleResize);
       clearTimeout(resizeTimer);
