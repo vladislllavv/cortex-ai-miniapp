@@ -2,6 +2,8 @@ import { useState, useMemo } from "react";
 import TaskCard from "@/components/TaskCard";
 import { useTaskStore } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useTaskStats } from "@/hooks/useTaskStats";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 
 export default function HomePage() {
@@ -12,6 +14,10 @@ export default function HomePage() {
   const categories = useTaskStore((state) => state.categories);
   const categoryEvents = useTaskStore((state) => state.categoryEvents);
   const deleteCategoryEvent = useTaskStore((state) => state.deleteCategoryEvent);
+  const isDataLoaded = useTaskStore((state) => state.isDataLoaded);
+
+  const isOnline = useOnlineStatus();
+  const stats = useTaskStats();
   const ru = language === "ru";
 
   const todayStr = new Date().toISOString().split("T")[0];
@@ -28,16 +34,13 @@ export default function HomePage() {
   const todayBirthdays = birthdays.filter((b) => b.date === `${todayMonth}-${todayDay}`);
   const tomorrowBirthdays = birthdays.filter((b) => b.date === `${tomorrowMonth}-${tomorrowDay}`);
 
-  // Все активные задачи
   const activeTasks = useMemo(() => tasks.filter((t) => t.status !== "done"), [tasks]);
 
-  // БЛОК 1: Ежедневные задачи БЕЗ даты — отдельный список
   const dailyNoDate = useMemo(() =>
     activeTasks.filter((t) => t.repeat === "daily" && !t.dueDate),
     [activeTasks]
   );
 
-  // Задачи С датой
   const tasksWithDate = useMemo(() =>
     activeTasks.filter((t) => !(t.repeat === "daily" && !t.dueDate)),
     [activeTasks]
@@ -57,69 +60,199 @@ export default function HomePage() {
     tasksWithDate.filter((t) =>
       t.dueDate &&
       !t.dueDate.startsWith(todayStr) &&
-      !t.dueDate.startsWith(tomorrowStr)
+      !t.dueDate.startsWith(tomorrowStr) &&
+      new Date(t.dueDate) >= now
     ),
     [tasksWithDate, todayStr, tomorrowStr]
+  );
+
+  const overdueTasks = useMemo(() =>
+    tasksWithDate.filter((t) =>
+      t.dueDate && new Date(t.dueDate) < now &&
+      !t.dueDate.startsWith(todayStr)
+    ),
+    [tasksWithDate, todayStr]
   );
 
   const doneTasks = useMemo(() => tasks.filter((t) => t.status === "done"), [tasks]);
 
   const [showDone, setShowDone] = useState(false);
   const [showDailyNoDate, setShowDailyNoDate] = useState(true);
+  const [showOverdue, setShowOverdue] = useState(true);
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
   const activeSectionData = useMemo(() => {
     if (!activeSection) return null;
     if (activeSection === "birthdays") {
-      return birthdays.map((b) => ({ id: b.id, title: b.name, subtitle: b.date, color: b.color, icon: "🎂", type: "birthday" as const }));
+      return birthdays.map((b) => ({
+        id: b.id, title: b.name, subtitle: b.date,
+        color: b.color, icon: "🎂", type: "birthday" as const,
+      }));
     }
     if (activeSection === "vacations") {
-      return vacations.map((v) => ({ id: v.id, title: v.title, subtitle: `${v.startDate} — ${v.endDate}`, color: v.color, icon: "🌴", type: "vacation" as const }));
+      return vacations.map((v) => ({
+        id: v.id, title: v.title, subtitle: `${v.startDate} — ${v.endDate}`,
+        color: v.color, icon: "🌴", type: "vacation" as const,
+      }));
     }
     const events = categoryEvents.filter((e) => e.categoryId === activeSection);
     return events.map((e) => {
       const cat = categories.find((c) => c.id === e.categoryId);
-      return { id: e.id, title: e.title, subtitle: e.endDate ? `${e.date} — ${e.endDate}` : e.date, color: e.color || cat?.color || "#3b82f6", icon: cat?.icon || "📁", type: "event" as const };
+      return {
+        id: e.id, title: e.title,
+        subtitle: e.endDate ? `${e.date} — ${e.endDate}` : e.date,
+        color: e.color || cat?.color || "#3b82f6",
+        icon: cat?.icon || "📁", type: "event" as const,
+      };
     });
   }, [activeSection, birthdays, vacations, categoryEvents, categories]);
 
   return (
     <div style={{ paddingTop: "8px" }}>
 
+      {/* Офлайн баннер */}
+      {!isOnline && (
+        <div style={{
+          backgroundColor: "rgba(245,158,11,0.1)",
+          border: "1px solid rgba(245,158,11,0.3)",
+          borderRadius: "12px", padding: "8px 12px",
+          marginBottom: "12px",
+          display: "flex", alignItems: "center", gap: "8px",
+        }}>
+          <span style={{ fontSize: "14px" }}>📶</span>
+          <p style={{ fontSize: "12px", color: "#fbbf24", margin: 0 }}>
+            {ru ? "Нет интернета — работаем офлайн" : "No internet — working offline"}
+          </p>
+        </div>
+      )}
+
+      {/* Синхронизация */}
+      {!isDataLoaded && (
+        <div style={{
+          backgroundColor: "rgba(59,130,246,0.08)",
+          border: "1px solid rgba(59,130,246,0.15)",
+          borderRadius: "10px", padding: "8px 12px",
+          marginBottom: "12px",
+          display: "flex", alignItems: "center", gap: "8px",
+        }}>
+          <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#3b82f6", animation: "pulse-dot 1s ease-in-out infinite" }} />
+          <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)" }}>
+            {ru ? "Синхронизация..." : "Syncing..."}
+          </span>
+        </div>
+      )}
+
       {/* Брифинг */}
-      <div style={{ backgroundColor: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: "18px", padding: "16px", marginBottom: "16px" }}>
+      <div style={{
+        backgroundColor: "rgba(59,130,246,0.1)",
+        border: "1px solid rgba(59,130,246,0.2)",
+        borderRadius: "18px", padding: "16px", marginBottom: "16px",
+      }}>
         <p style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", margin: "0 0 4px 0", textTransform: "uppercase", letterSpacing: "0.5px" }}>
           {ru ? "Ежедневный брифинг" : "Daily briefing"}
         </p>
         <p style={{ fontSize: "26px", fontWeight: 700, color: "white", margin: "0 0 4px 0", lineHeight: 1.2 }}>
-          {activeTasks.length} {ru ? (activeTasks.length === 1 ? "задача" : activeTasks.length < 5 ? "задачи" : "задач") : "tasks"}
+          {stats.active} {ru
+            ? (stats.active === 1 ? "задача" : stats.active < 5 ? "задачи" : "задач")
+            : stats.active === 1 ? "task" : "tasks"}
         </p>
-        <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
-          {activeTasks.length === 0
-            ? (ru ? "Все задачи выполнены! 🎉" : "All tasks done! 🎉")
-            : todayTasks.length > 0
-              ? ru ? `${todayTasks.length} на сегодня` : `${todayTasks.length} for today`
+        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+          <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+            {stats.active === 0
+              ? (ru ? "Все задачи выполнены! 🎉" : "All tasks done! 🎉")
+              : stats.today > 0
+              ? ru ? `${stats.today} на сегодня` : `${stats.today} for today`
               : ru ? "На сегодня задач нет" : "No tasks for today"}
-        </p>
+          </p>
+          {stats.completionRate > 0 && (
+            <p style={{ fontSize: "13px", color: "rgba(34,197,94,0.7)", margin: 0 }}>
+              ✅ {stats.completionRate}% {ru ? "выполнено" : "done"}
+            </p>
+          )}
+        </div>
+
+        {/* Мини-прогресс бар */}
+        {stats.total > 0 && (
+          <div style={{ marginTop: "10px", height: "3px", backgroundColor: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
+            <div style={{
+              height: "100%",
+              width: `${stats.completionRate}%`,
+              backgroundColor: "#3b82f6",
+              borderRadius: "2px",
+              transition: "width 0.5s ease",
+            }} />
+          </div>
+        )}
       </div>
 
-      {/* Дни рождения */}
+      {/* Просроченные задачи */}
+      {overdueTasks.length > 0 && (
+        <div style={{ marginBottom: "16px" }}>
+          <div style={{
+            backgroundColor: "rgba(239,68,68,0.08)",
+            border: "1px solid rgba(239,68,68,0.2)",
+            borderRadius: "12px", padding: "8px 12px",
+            marginBottom: "8px",
+            display: "flex", alignItems: "center", gap: "8px",
+          }}>
+            <span style={{ fontSize: "14px" }}>⚠️</span>
+            <p style={{ fontSize: "12px", color: "#fca5a5", margin: 0, flex: 1 }}>
+              {ru
+                ? `${overdueTasks.length} просроченных задач`
+                : `${overdueTasks.length} overdue tasks`}
+            </p>
+            <button
+              onClick={() => setShowOverdue(!showOverdue)}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.4)", fontSize: "12px" }}
+            >
+              {showOverdue ? "▲" : "▼"}
+            </button>
+          </div>
+          {showOverdue && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {overdueTasks.map((task) => <TaskCard key={task.id} task={task} />)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Дни рождения сегодня */}
       {todayBirthdays.length > 0 && (
-        <div style={{ backgroundColor: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "14px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{
+          backgroundColor: "rgba(59,130,246,0.12)",
+          border: "1px solid rgba(59,130,246,0.25)",
+          borderRadius: "14px", padding: "12px 14px",
+          marginBottom: "10px",
+          display: "flex", alignItems: "center", gap: "10px",
+        }}>
           <span style={{ fontSize: "20px" }}>🎂</span>
           <div>
-            <p style={{ fontSize: "13px", fontWeight: 600, color: "#93c5fd", margin: 0 }}>{ru ? "День рождения сегодня!" : "Birthday today!"}</p>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", margin: 0 }}>{todayBirthdays.map((b) => b.name).join(", ")}</p>
+            <p style={{ fontSize: "13px", fontWeight: 600, color: "#93c5fd", margin: 0 }}>
+              {ru ? "День рождения сегодня!" : "Birthday today!"}
+            </p>
+            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", margin: 0 }}>
+              {todayBirthdays.map((b) => b.name).join(", ")}
+            </p>
           </div>
         </div>
       )}
 
       {tomorrowBirthdays.length > 0 && (
-        <div style={{ backgroundColor: "rgba(59,130,246,0.07)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: "14px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{
+          backgroundColor: "rgba(59,130,246,0.07)",
+          border: "1px solid rgba(59,130,246,0.15)",
+          borderRadius: "14px", padding: "12px 14px",
+          marginBottom: "10px",
+          display: "flex", alignItems: "center", gap: "10px",
+        }}>
           <span style={{ fontSize: "20px" }}>🎂</span>
           <div>
-            <p style={{ fontSize: "13px", fontWeight: 600, color: "rgba(147,197,253,0.8)", margin: 0 }}>{ru ? "День рождения завтра" : "Birthday tomorrow"}</p>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{tomorrowBirthdays.map((b) => b.name).join(", ")}</p>
+            <p style={{ fontSize: "13px", fontWeight: 600, color: "rgba(147,197,253,0.8)", margin: 0 }}>
+              {ru ? "День рождения завтра" : "Birthday tomorrow"}
+            </p>
+            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+              {tomorrowBirthdays.map((b) => b.name).join(", ")}
+            </p>
           </div>
         </div>
       )}
@@ -150,12 +283,17 @@ export default function HomePage() {
                     color: isActive ? cat.color : "rgba(255,255,255,0.6)",
                     fontSize: "13px", fontWeight: isActive ? 600 : 400,
                     cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
+                    transition: "all 0.15s ease",
                   }}
                 >
                   <span>{cat.icon}</span>
                   <span>{cat.name}</span>
                   {count > 0 && (
-                    <span style={{ fontSize: "11px", backgroundColor: isActive ? `${cat.color}40` : "rgba(255,255,255,0.1)", borderRadius: "10px", padding: "1px 6px" }}>
+                    <span style={{
+                      fontSize: "11px",
+                      backgroundColor: isActive ? `${cat.color}40` : "rgba(255,255,255,0.1)",
+                      borderRadius: "10px", padding: "1px 6px",
+                    }}>
                       {count}
                     </span>
                   )}
@@ -165,7 +303,12 @@ export default function HomePage() {
           </div>
 
           {activeSection && activeSectionData !== null && (
-            <div style={{ marginTop: "10px", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: "14px", padding: "12px", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <div style={{
+              marginTop: "10px",
+              backgroundColor: "rgba(255,255,255,0.04)",
+              borderRadius: "14px", padding: "12px",
+              border: "1px solid rgba(255,255,255,0.07)",
+            }}>
               {activeSectionData.length === 0 ? (
                 <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.3)", margin: 0, textAlign: "center" }}>
                   {ru ? "Нет данных. Добавь в Календаре." : "No data. Add in Calendar."}
@@ -173,7 +316,13 @@ export default function HomePage() {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                   {activeSectionData.map((item) => (
-                    <div key={item.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", backgroundColor: "rgba(255,255,255,0.05)", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    <div key={item.id} style={{
+                      display: "flex", alignItems: "center", gap: "10px",
+                      padding: "8px 10px",
+                      backgroundColor: "rgba(255,255,255,0.05)",
+                      borderRadius: "10px",
+                      border: "1px solid rgba(255,255,255,0.06)",
+                    }}>
                       <span style={{ fontSize: "16px" }}>{item.icon}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <p style={{ fontSize: "14px", fontWeight: 500, color: "white", margin: 0, wordBreak: "break-word" }}>{item.title}</p>
@@ -189,7 +338,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* БЛОК 1: Ежедневные задачи без даты */}
+      {/* Ежедневные без даты */}
       {dailyNoDate.length > 0 && (
         <div style={{ marginBottom: "20px" }}>
           <button
@@ -208,11 +357,16 @@ export default function HomePage() {
 
           {showDailyNoDate && (
             <>
-              <div style={{ backgroundColor: "rgba(255,165,0,0.08)", border: "1px solid rgba(255,165,0,0.2)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px" }}>
+              <div style={{
+                backgroundColor: "rgba(255,165,0,0.08)",
+                border: "1px solid rgba(255,165,0,0.2)",
+                borderRadius: "10px", padding: "8px 12px",
+                marginBottom: "8px",
+              }}>
                 <p style={{ fontSize: "11px", color: "rgba(255,165,0,0.7)", margin: 0 }}>
                   {ru
-                    ? "ℹ️ Эти задачи повторяются каждый день без конкретного времени. Удали ненужные или добавь дату."
-                    : "ℹ️ These tasks repeat daily without a specific time. Delete unnecessary ones or add a date."}
+                    ? "ℹ️ Эти задачи повторяются каждый день. Добавь дату или удали ненужные."
+                    : "ℹ️ These tasks repeat daily. Add a date or delete unnecessary ones."}
                 </p>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -260,6 +414,13 @@ export default function HomePage() {
           )}
         </div>
       )}
+
+      <style>{`
+        @keyframes pulse-dot {
+          0%, 100% { opacity: 0.4; transform: scale(0.8); }
+          50% { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
     </div>
   );
 }
