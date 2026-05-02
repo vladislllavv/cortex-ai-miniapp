@@ -219,7 +219,7 @@ function saveCategoryEventsLocal(events: CategoryEvent[]) {
   try { localStorage.setItem(CATEGORY_EVENTS_KEY, JSON.stringify(events)); } catch {}
 }
 
-// БЛОК 2: Синхронизация — сохраняем в Firebase по userId
+// Только одна запись — в users/{userId}/tasks
 async function saveTaskToFirebase(task: Task, userId: string) {
   if (userId === "unknown") return;
   try {
@@ -249,7 +249,6 @@ async function deleteTaskFromFirebase(taskId: string, userId: string) {
   }
 }
 
-// БЛОК 3: Удаление выполненных задач старше 1 дня
 async function cleanupDoneTasks(userId: string): Promise<Task[]> {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -273,7 +272,6 @@ async function cleanupDoneTasks(userId: string): Promise<Task[]> {
     }
   }
 
-  // Чистим локально
   const localTasks = loadTasks();
   const filtered = localTasks.filter((t) => {
     if (t.status === "done" && t.completedAt) {
@@ -297,6 +295,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   isDataLoaded: false,
   isSynced: false,
 
+  // Только одна запись в Firebase
   addTask: async (task) => {
     const newTask: Task = {
       ...task,
@@ -316,27 +315,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       return { tasks: updated };
     });
 
-    // Async Firebase
+    // Только одна запись в users/{userId}/tasks
     const userId = getTelegramUserId();
-    Promise.all([
-      saveTaskToFirebase(newTask, userId),
-      userId !== "unknown" ? addDoc(collection(db, "tasks"), {
-        userId,
-        taskId: newTask.id,
-        title: newTask.title,
-        description: newTask.description || "",
-        dueDate: newTask.dueDate || null,
-        priority: newTask.priority,
-        status: newTask.status,
-        createdAt: newTask.createdAt,
-        isSent: false,
-        reminderAt: newTask.dueDate && !isNaN(new Date(newTask.dueDate).getTime())
-          ? Timestamp.fromDate(new Date(newTask.dueDate))
-          : null,
-        repeat: newTask.repeat || "none",
-        type: newTask.type || "task",
-      }).catch(console.error) : Promise.resolve(),
-    ]).catch(console.error);
+    saveTaskToFirebase(newTask, userId).catch(console.error);
   },
 
   updateTask: (taskId, updates) => {
@@ -362,7 +343,6 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     });
   },
 
-  // БЛОК 3: При выполнении — сохраняем время выполнения
   toggleTaskStatus: (taskId) => {
     set((state) => {
       const updated = state.tasks.map((t) => {
@@ -471,13 +451,15 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
-  // БЛОК 2: Загрузка и синхронизация
   loadUserData: async (userId) => {
     if (userId === "unknown") {
       set({ isDataLoaded: true });
       return;
     }
     try {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+
       const [birthdaysSnap, vacationsSnap, categoryEventsSnap, tasksSnap] = await Promise.all([
         getDocs(collection(db, "users", userId, "birthdays")),
         getDocs(collection(db, "users", userId, "vacations")),
@@ -494,13 +476,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       const categoryEvents: CategoryEvent[] = [];
       categoryEventsSnap.forEach((d) => categoryEvents.push(d.data() as CategoryEvent));
 
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-
       const cloudTasks: Task[] = [];
       tasksSnap.forEach((d) => {
         const data = d.data();
-        // БЛОК 3: Не загружаем выполненные задачи старше 1 дня
         if (data.status === "done" && data.completedAt) {
           const completedAt = new Date(data.completedAt);
           if (completedAt < yesterday) return;
@@ -508,7 +486,6 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         cloudTasks.push(normalizeTask(data));
       });
 
-      // Мержим с локальными
       const localTasks = loadTasks();
       const mergedTasks = [...cloudTasks];
       localTasks.forEach((lt) => {
@@ -544,7 +521,6 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     }
   },
 
-  // БЛОК 2: Realtime синхронизация между устройствами
   startSync: (userId) => {
     if (userId === "unknown") return () => {};
 
@@ -581,7 +557,6 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     return () => unsubTasks();
   },
 
-  // БЛОК 3: Очистка старых задач
   cleanupOldTasks: async (userId) => {
     const filtered = await cleanupDoneTasks(userId);
     set({ tasks: filtered });
@@ -597,23 +572,15 @@ export function usePersistTasks() {
     }
 
     const userId = getTelegramUserId();
-
-    // Загружаем данные
     useTaskStore.getState().loadUserData(userId);
-
-    // БЛОК 2: Realtime синхронизация
     const unsubscribe = useTaskStore.getState().startSync(userId);
-
-    // БЛОК 3: Очищаем старые выполненные задачи
     useTaskStore.getState().cleanupOldTasks(userId);
 
     return () => unsubscribe();
   }, []);
 }
 
-// БЛОК 5: Обновлённый производственный календарь 2026-2027
 export const RUSSIAN_HOLIDAYS: Record<string, string> = {
-  // 2026
   "2026-01-01": "Новый год",
   "2026-01-02": "Новогодние каникулы",
   "2026-01-03": "Новогодние каникулы",
@@ -623,7 +590,7 @@ export const RUSSIAN_HOLIDAYS: Record<string, string> = {
   "2026-01-07": "Рождество Христово",
   "2026-01-08": "Новогодние каникулы",
   "2026-02-23": "День защитника Отечества",
-  "2026-03-09": "Международный женский день (перенос с 8 марта)",
+  "2026-03-09": "Международный женский день (перенос)",
   "2026-05-01": "Праздник Весны и Труда",
   "2026-05-04": "Праздник Весны и Труда (перенос)",
   "2026-05-09": "День Победы",
@@ -631,7 +598,6 @@ export const RUSSIAN_HOLIDAYS: Record<string, string> = {
   "2026-06-12": "День России",
   "2026-11-04": "День народного единства",
   "2026-12-31": "Новогодние каникулы (перенос)",
-  // 2027
   "2027-01-01": "Новый год",
   "2027-01-02": "Новогодние каникулы",
   "2027-01-03": "Новогодние каникулы",
@@ -640,12 +606,12 @@ export const RUSSIAN_HOLIDAYS: Record<string, string> = {
   "2027-01-06": "Новогодние каникулы",
   "2027-01-07": "Рождество Христово",
   "2027-01-08": "Новогодние каникулы",
-  "2027-02-22": "День защитника Отечества (перенос с 23 февраля)",
+  "2027-02-22": "День защитника Отечества (перенос)",
   "2027-03-08": "Международный женский день",
   "2027-05-03": "Праздник Весны и Труда (перенос)",
   "2027-05-09": "День Победы",
   "2027-05-10": "День Победы (перенос)",
-  "2027-06-14": "День России (перенос с 12 июня)",
+  "2027-06-14": "День России (перенос)",
   "2027-11-04": "День народного единства",
   "2027-11-05": "День народного единства (перенос)",
   "2027-12-31": "Новогодние каникулы (перенос)",
