@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { db } from "./firebase";
 import {
   collection,
+  addDoc,
   Timestamp,
   doc,
   getDoc,
@@ -101,9 +102,7 @@ const CATEGORIES_KEY = "cortex-categories";
 const CATEGORY_EVENTS_KEY = "cortex-category-events";
 
 export function saveChatHistory(messages: { role: string; content: string }[]) {
-  try {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
-  } catch {}
+  try { localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages)); } catch {}
 }
 
 export function loadChatHistory(): { role: string; content: string }[] {
@@ -131,15 +130,11 @@ export async function checkSubscription(userId: string): Promise<boolean> {
     const data = subDoc.data();
     if (!data.isActive || !data.expiresAt) return false;
     return data.expiresAt.toDate() > new Date();
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 export async function getSubscriptionInfo(userId: string): Promise<{
-  isActive: boolean;
-  expiresAt: Date | null;
-  daysLeft: number;
+  isActive: boolean; expiresAt: Date | null; daysLeft: number;
 }> {
   try {
     if (userId === "unknown") return { isActive: false, expiresAt: null, daysLeft: 0 };
@@ -150,9 +145,7 @@ export async function getSubscriptionInfo(userId: string): Promise<{
     const expiresAt = data.expiresAt.toDate();
     const daysLeft = Math.ceil((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     return { isActive: daysLeft > 0, expiresAt, daysLeft };
-  } catch {
-    return { isActive: false, expiresAt: null, daysLeft: 0 };
-  }
+  } catch { return { isActive: false, expiresAt: null, daysLeft: 0 }; }
 }
 
 function normalizeTask(task: any): Task {
@@ -206,9 +199,7 @@ function loadTasks(): Task[] {
 
 function saveTasks(tasks: Task[]) {
   if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-  } catch {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); } catch {}
 }
 
 function loadCategories(): CustomCategory[] {
@@ -223,9 +214,7 @@ function loadCategories(): CustomCategory[] {
 }
 
 function saveCategories(cats: CustomCategory[]) {
-  try {
-    localStorage.setItem(CATEGORIES_KEY, JSON.stringify(cats));
-  } catch {}
+  try { localStorage.setItem(CATEGORIES_KEY, JSON.stringify(cats)); } catch {}
 }
 
 function loadCategoryEvents(): CategoryEvent[] {
@@ -237,11 +226,10 @@ function loadCategoryEvents(): CategoryEvent[] {
 }
 
 function saveCategoryEventsLocal(events: CategoryEvent[]) {
-  try {
-    localStorage.setItem(CATEGORY_EVENTS_KEY, JSON.stringify(events));
-  } catch {}
+  try { localStorage.setItem(CATEGORY_EVENTS_KEY, JSON.stringify(events)); } catch {}
 }
 
+// Сохраняем в users/{userId}/tasks для синхронизации
 async function saveTaskToFirebase(task: Task, userId: string) {
   if (userId === "unknown") return;
   try {
@@ -259,6 +247,32 @@ async function saveTaskToFirebase(task: Task, userId: string) {
     });
   } catch (e: any) {
     console.error("Firebase save error:", e.message);
+  }
+}
+
+// Сохраняем в /tasks для уведомлений бота
+async function saveTaskForBot(task: Task, userId: string) {
+  if (userId === "unknown" || !task.dueDate) return;
+  try {
+    const date = new Date(task.dueDate);
+    if (!isNaN(date.getTime())) {
+      await addDoc(collection(db, "tasks"), {
+        userId,
+        taskId: task.id,
+        title: task.title,
+        description: task.description || "",
+        dueDate: task.dueDate,
+        priority: task.priority,
+        status: task.status,
+        createdAt: task.createdAt,
+        isSent: false,
+        reminderAt: Timestamp.fromDate(date),
+        repeat: task.repeat || "none",
+        type: task.type || "task",
+      });
+    }
+  } catch (e: any) {
+    console.error("Bot task save error:", e.message);
   }
 }
 
@@ -293,13 +307,21 @@ export const useTaskStore = create<TaskStore>((set) => ({
       type: task.type || "task",
       items: task.items || [],
     };
+
+    // Мгновенно в UI
     set((state) => {
       const updated = [newTask, ...state.tasks];
       saveTasks(updated);
       return { tasks: updated };
     });
+
     const userId = getTelegramUserId();
+
+    // Сохраняем в users/{userId}/tasks для синхронизации
     saveTaskToFirebase(newTask, userId).catch(console.error);
+
+    // Сохраняем в /tasks для уведомлений бота
+    saveTaskForBot(newTask, userId).catch(console.error);
   },
 
   updateTask: (taskId, updates) => {
@@ -485,8 +507,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
           const completedDay = data.completedAt.split("T")[0];
           if (completedDay < todayStr) {
             const resetTask = normalizeTask({
-              ...data,
-              id: d.id,
+              ...data, id: d.id,
               status: "todo",
               completedAt: undefined,
               updatedAt: new Date().toISOString(),
@@ -531,6 +552,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
           }
           mergedTasks.push(localTask);
           saveTaskToFirebase(localTask, userId).catch(console.error);
+          saveTaskForBot(localTask, userId).catch(console.error);
         }
       });
 
@@ -578,8 +600,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
             const completedDay = data.completedAt.split("T")[0];
             if (completedDay < todayStr) {
               cloudMap.set(d.id, normalizeTask({
-                ...data,
-                id: d.id,
+                ...data, id: d.id,
                 status: "todo",
                 completedAt: undefined,
               }));
