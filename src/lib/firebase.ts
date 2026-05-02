@@ -2,12 +2,12 @@ import { initializeApp, getApps } from "firebase/app";
 import { getFirestore, enableNetwork, disableNetwork } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: "AIzaSyASx0saii-gMIHmCC_e3i7gAIqL6NxUMZ4",
+  authDomain: "cortexai-65075.firebaseapp.com",
+  projectId: "cortexai-65075",
+  storageBucket: "cortexai-65075.firebasestorage.app",
+  messagingSenderId: "417649566965",
+  appId: "1:417649566965:web:f36c20a9e7af9a77da91bc",
 };
 
 const app = getApps().length === 0
