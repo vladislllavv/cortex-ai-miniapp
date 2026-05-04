@@ -21,18 +21,10 @@ export default function App() {
     try {
       const tg = (window as any).Telegram?.WebApp;
       if (tg) {
-        // Полноэкранный режим
-        tg.expand();
         tg.ready();
-        tg.requestFullscreen?.();
-
-        // Цвета темы
+        tg.expand();
         if (tg.setHeaderColor) tg.setHeaderColor("#0f172a");
         if (tg.setBackgroundColor) tg.setBackgroundColor("#0f172a");
-
-        // Отключаем свайп для закрытия
-        if (tg.disableClosingConfirmation) tg.disableClosingConfirmation();
-        if (tg.enableClosingConfirmation) tg.enableClosingConfirmation();
       }
     } catch {}
 
@@ -50,7 +42,6 @@ export default function App() {
     };
 
     window.addEventListener("resize", onResize, { passive: true });
-
     return () => {
       window.removeEventListener("resize", onResize);
       clearTimeout(timer);
@@ -69,15 +60,7 @@ export default function App() {
       <style>{`
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         html { height: 100%; overflow: hidden; background: #0f172a; }
-        body {
-          height: 100%;
-          overflow: hidden;
-          background: #0f172a;
-          position: fixed;
-          width: 100%;
-          top: 0;
-          left: 0;
-        }
+        body { height: 100%; overflow: hidden; background: #0f172a; position: fixed; width: 100%; top: 0; left: 0; }
         #root { height: 100%; overflow: hidden; }
         input, textarea, select { font-size: 16px !important; }
         @keyframes bounce { 0%, 100% { transform: translateY(0); opacity: 0.4; } 50% { transform: translateY(-4px); opacity: 1; } }
@@ -98,7 +81,6 @@ export default function App() {
         flexDirection: "column",
         overflow: "hidden",
       }}>
-        {/* Контент */}
         <div style={{
           flex: 1,
           overflowY: "auto",
@@ -123,7 +105,6 @@ export default function App() {
 
         {tab === "home" && <AddBtn />}
 
-        {/* Навигация */}
         <div style={{
           position: "fixed",
           bottom: 0, left: 0, right: 0,
