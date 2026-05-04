@@ -61,7 +61,7 @@ async function grantSubscription(userId, days = 30, isGift = false) {
   });
 }
 
-// ============ GROQ AI ============
+// ============ GROQ AI — БЫСТРАЯ МОДЕЛЬ ============
 
 async function askGroq(messages, systemPrompt) {
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -71,13 +71,14 @@ async function askGroq(messages, systemPrompt) {
       "Authorization": `Bearer ${GROQ_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
+      model: "llama-3.1-8b-instant",
       messages: [
         { role: "system", content: systemPrompt },
         ...messages,
       ],
-      max_tokens: 600,
-      temperature: 0.7,
+      max_tokens: 400,
+      temperature: 0.6,
+      stream: false,
     }),
   });
 
@@ -90,66 +91,8 @@ async function askGroq(messages, systemPrompt) {
   return data.choices?.[0]?.message?.content || "Нет ответа";
 }
 
-function parseTimeFromText(text) {
-  const now = new Date();
-  const lower = text.toLowerCase();
+// ============ AI СЛУШАТЕЛЬ ============
 
-  const minMatch = lower.match(/через\s+(\d+)\s*(минут|мин)/);
-  if (minMatch) {
-    const d = new Date(now);
-    d.setMinutes(d.getMinutes() + parseInt(minMatch[1]));
-    return d;
-  }
-
-  const hourMatch = lower.match(/через\s+(\d+)\s*(час|ч)/);
-  if (hourMatch) {
-    const d = new Date(now);
-    d.setHours(d.getHours() + parseInt(hourMatch[1]));
-    return d;
-  }
-
-  const dayMatch = lower.match(/через\s+(\d+)\s*(день|дня|дней)/);
-  if (dayMatch) {
-    const d = new Date(now);
-    d.setDate(d.getDate() + parseInt(dayMatch[1]));
-    d.setHours(9, 0, 0);
-    return d;
-  }
-
-  const timeMatch = lower.match(/в\s+(\d{1,2})[:\s]?(\d{2})?/);
-  if (timeMatch) {
-    const d = new Date(now);
-    d.setHours(parseInt(timeMatch[1]), timeMatch[2] ? parseInt(timeMatch[2]) : 0, 0, 0);
-    if (d <= now) d.setDate(d.getDate() + 1);
-    return d;
-  }
-
-  if (lower.includes("завтра")) {
-    const d = new Date(now);
-    d.setDate(d.getDate() + 1);
-    const m = lower.match(/завтра.*в\s+(\d{1,2})[:\s]?(\d{2})?/);
-    if (m) { d.setHours(parseInt(m[1]), m[2] ? parseInt(m[2]) : 0, 0, 0); }
-    else d.setHours(9, 0, 0, 0);
-    return d;
-  }
-
-  if (lower.includes("сегодня")) {
-    const d = new Date(now);
-    const m = lower.match(/сегодня.*в\s+(\d{1,2})[:\s]?(\d{2})?/);
-    if (m) { d.setHours(parseInt(m[1]), m[2] ? parseInt(m[2]) : 0, 0, 0); }
-    else d.setHours(18, 0, 0, 0);
-    if (d <= now) d.setDate(d.getDate() + 1);
-    return d;
-  }
-
-  if (lower.includes("утром")) { const d = new Date(now); d.setHours(9, 0, 0, 0); if (d <= now) d.setDate(d.getDate() + 1); return d; }
-  if (lower.includes("вечером")) { const d = new Date(now); d.setHours(19, 0, 0, 0); if (d <= now) d.setDate(d.getDate() + 1); return d; }
-  if (lower.includes("ночью")) { const d = new Date(now); d.setHours(23, 0, 0, 0); if (d <= now) d.setDate(d.getDate() + 1); return d; }
-
-  return null;
-}
-
-// Слушаем AI запросы из Firebase
 function startAiListener() {
   console.log("AI слушатель запущен ✅");
 
@@ -159,67 +102,64 @@ function startAiListener() {
   );
 
   onSnapshot(q, async (snapshot) => {
-    for (const change of snapshot.docChanges()) {
-      if (change.type !== "added") continue;
+    const newDocs = snapshot.docChanges().filter((c) => c.type === "added");
+    if (newDocs.length === 0) return;
 
+    for (const change of newDocs) {
       const requestDoc = change.doc;
       const request = requestDoc.data();
       const requestId = requestDoc.id;
 
-      // Помечаем как обрабатываемый
       try {
         await updateDoc(doc(db, "ai_requests", requestId), {
           status: "processing",
           processedAt: new Date().toISOString(),
         });
-      } catch { continue; }
+      } catch {
+        continue;
+      }
 
       const { userId, message, history, language, tasks } = request;
+      console.log(`⚡ AI запрос от ${userId}: ${(message || "").slice(0, 50)}`);
 
-      console.log(`AI запрос от ${userId}: ${message}`);
+      const ru = language === "ru";
+      const now = new Date();
 
-      try {
-        const ru = language === "ru";
-        const now = new Date();
+      const systemPrompt = `Ты AI ассистент планировщика CortexAI. Время: ${now.toLocaleString("ru-RU")}.
 
-        // Формируем системный промпт
-        const systemPrompt = `Ты умный AI ассистент планировщика задач CortexAI.
+Задачи пользователя: ${tasks && tasks.length > 0
+  ? tasks.map(t => `${t.title}${t.dueDate ? ` (${new Date(t.dueDate).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })})` : ""}`).join(", ")
+  : "нет задач"}
 
-Текущее время: ${now.toLocaleString("ru-RU")}
-
-Активные задачи пользователя:
-${tasks && tasks.length > 0
-  ? tasks.map(t => `- ${t.title}${t.dueDate ? ` (${new Date(t.dueDate).toLocaleString("ru-RU")})` : ""}`).join("\n")
-  : "Задач пока нет"}
-
-ВАЖНО: Если пользователь хочет создать задачу или напоминание, обязательно верни JSON в конце ответа:
-TASK_JSON:{"title":"название","dueDate":"2026-01-15T14:30:00.000Z","priority":"medium","repeat":"none"}
+Если пользователь хочет создать задачу или напоминание — добавь в конец ответа:
+TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","priority":"medium","repeat":"none"}
 
 Правила:
-- priority: "low", "medium" или "high"
-- repeat: "none" или "daily"  
-- dueDate: ISO строка или null если времени нет
-- Если времени нет — спроси когда напомнить
-- Отвечай кратко и дружелюбно на ${ru ? "русском" : "английском"}
+- Отвечай коротко (2-3 предложения максимум)
+- ${ru ? "Только на русском языке" : "Only in English"}
 - Используй эмодзи
-- Максимум 3-4 предложения`;
+- priority: low, medium или high
+- repeat: none или daily
+- Если пользователь не указал время — спроси когда напомнить
+- dueDate должна быть валидной ISO строкой или null`;
 
-        // Запрашиваем у Groq
-        const aiResponse = await askGroq(history || [], systemPrompt);
+      try {
+        const recentHistory = (history || []).slice(-6);
+        const startTime = Date.now();
 
-        // Парсим задачу из ответа
+        const aiResponse = await askGroq(recentHistory, systemPrompt);
+        console.log(`⏱ Groq ответил за ${Date.now() - startTime}ms`);
+
         let taskCreated = null;
         const taskJsonMatch = aiResponse.match(/TASK_JSON:(\{[^}]+\})/);
 
         if (taskJsonMatch) {
           try {
             const taskData = JSON.parse(taskJsonMatch[1]);
-
             if (taskData.title && taskData.title.length > 1) {
-              const taskId = `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-              const now2 = new Date();
+              const taskId = `ai_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+              const nowIso = new Date().toISOString();
 
-              // Сохраняем задачу в users/{userId}/tasks
               const taskForSync = {
                 id: taskId,
                 title: taskData.title,
@@ -228,8 +168,8 @@ TASK_JSON:{"title":"название","dueDate":"2026-01-15T14:30:00.000Z","prio
                 priority: taskData.priority || "medium",
                 status: "todo",
                 isAiCreated: true,
-                createdAt: now2.toISOString(),
-                updatedAt: now2.toISOString(),
+                createdAt: nowIso,
+                updatedAt: nowIso,
                 notified: false,
                 repeat: taskData.repeat || "none",
                 category: "",
@@ -240,28 +180,33 @@ TASK_JSON:{"title":"название","dueDate":"2026-01-15T14:30:00.000Z","prio
                 reminderAt: taskData.dueDate ? Timestamp.fromDate(new Date(taskData.dueDate)) : null,
               };
 
-              await setDoc(doc(db, "users", userId, "tasks", taskId), taskForSync);
+              const saves = [
+                setDoc(doc(db, "users", userId, "tasks", taskId), taskForSync),
+              ];
 
-              // Если есть дата — сохраняем в /tasks для уведомлений бота
               if (taskData.dueDate) {
                 const dueDate = new Date(taskData.dueDate);
                 if (!isNaN(dueDate.getTime())) {
-                  await addDoc(collection(db, "tasks"), {
-                    userId,
-                    taskId,
-                    title: taskData.title,
-                    description: "",
-                    dueDate: taskData.dueDate,
-                    priority: taskData.priority || "medium",
-                    status: "todo",
-                    createdAt: now2.toISOString(),
-                    isSent: false,
-                    reminderAt: Timestamp.fromDate(dueDate),
-                    repeat: taskData.repeat || "none",
-                    type: "task",
-                  });
+                  saves.push(
+                    addDoc(collection(db, "tasks"), {
+                      userId,
+                      taskId,
+                      title: taskData.title,
+                      description: "",
+                      dueDate: taskData.dueDate,
+                      priority: taskData.priority || "medium",
+                      status: "todo",
+                      createdAt: nowIso,
+                      isSent: false,
+                      reminderAt: Timestamp.fromDate(dueDate),
+                      repeat: taskData.repeat || "none",
+                      type: "task",
+                    })
+                  );
                 }
               }
+
+              await Promise.all(saves);
 
               taskCreated = {
                 id: taskId,
@@ -277,51 +222,49 @@ TASK_JSON:{"title":"название","dueDate":"2026-01-15T14:30:00.000Z","prio
           }
         }
 
-        // Очищаем TASK_JSON из текста ответа
         const cleanResponse = aiResponse.replace(/TASK_JSON:\{[^}]+\}/, "").trim();
 
-        // Записываем ответ в Firebase
-        await setDoc(doc(db, "ai_responses", requestId), {
-          userId,
-          requestId,
-          message: cleanResponse,
-          taskCreated,
-          createdAt: new Date().toISOString(),
-          status: "done",
-        });
-
-        // Помечаем запрос как выполненный
-        await updateDoc(doc(db, "ai_requests", requestId), {
-          status: "done",
-          completedAt: new Date().toISOString(),
-        });
+        await Promise.all([
+          setDoc(doc(db, "ai_responses", requestId), {
+            userId,
+            requestId,
+            message: cleanResponse,
+            taskCreated,
+            createdAt: new Date().toISOString(),
+            status: "done",
+          }),
+          updateDoc(doc(db, "ai_requests", requestId), {
+            status: "done",
+            completedAt: new Date().toISOString(),
+          }),
+        ]);
 
         console.log(`✅ AI ответил пользователю ${userId}`);
       } catch (err) {
         console.log(`❌ Ошибка AI: ${err.message}`);
 
         const ru = language === "ru";
-        await setDoc(doc(db, "ai_responses", requestId), {
-          userId,
-          requestId,
-          message: ru
-            ? "⚠️ Произошла ошибка. Попробуй ещё раз."
-            : "⚠️ An error occurred. Please try again.",
-          taskCreated: null,
-          createdAt: new Date().toISOString(),
-          status: "error",
-        });
-
-        await updateDoc(doc(db, "ai_requests", requestId), {
-          status: "error",
-          completedAt: new Date().toISOString(),
-        });
+        await Promise.all([
+          setDoc(doc(db, "ai_responses", requestId), {
+            userId,
+            requestId,
+            message: ru
+              ? "⚠️ Произошла ошибка. Попробуй ещё раз."
+              : "⚠️ An error occurred. Please try again.",
+            taskCreated: null,
+            createdAt: new Date().toISOString(),
+            status: "error",
+          }),
+          updateDoc(doc(db, "ai_requests", requestId), {
+            status: "error",
+            completedAt: new Date().toISOString(),
+          }),
+        ]);
       }
     }
   }, (error) => {
     console.log("Ошибка слушателя AI:", error.message);
-    // Перезапускаем слушатель через 5 секунд
-    setTimeout(startAiListener, 5000);
+    setTimeout(startAiListener, 3000);
   });
 }
 
@@ -354,21 +297,19 @@ bot.onText(/\/gift (.+)/, async (msg, match) => {
     await grantSubscription(targetId, 3650, true);
     bot.sendMessage(msg.chat.id, `✅ Подписка выдана пользователю ${targetId}`);
     try { bot.sendMessage(targetId, "🎁 Тебе выдана бесплатная подписка CortexAI!\n\n✅ Безлимитные задачи\n✅ AI ассистент без лимитов"); } catch {}
-  } catch (err) {
-    bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
-  }
+  } catch (err) { bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`); }
 });
 
 bot.onText(/\/revoke (.+)/, async (msg, match) => {
   if (!isAdmin(String(msg.chat.id))) { bot.sendMessage(msg.chat.id, "❌ Нет прав."); return; }
   const targetId = match[1].trim();
   try {
-    await setDoc(doc(db, "subscriptions", String(targetId)), { userId: String(targetId), isActive: false, updatedAt: Timestamp.fromDate(new Date()) });
+    await setDoc(doc(db, "subscriptions", String(targetId)), {
+      userId: String(targetId), isActive: false, updatedAt: Timestamp.fromDate(new Date()),
+    });
     bot.sendMessage(msg.chat.id, `✅ Подписка отключена у ${targetId}`);
-    try { bot.sendMessage(targetId, "❌ Твоя подписка CortexAI была отключена."); } catch {}
-  } catch (err) {
-    bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
-  }
+    try { bot.sendMessage(targetId, "❌ Твоя подписка CortexAI была отключена.\n\nНапиши /subscribe для оформления."); } catch {}
+  } catch (err) { bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`); }
 });
 
 bot.onText(/\/subscribers/, async (msg) => {
@@ -386,7 +327,8 @@ bot.onText(/\/subscribers/, async (msg) => {
       else expiredList.push({ userId: sub.userId, expiresAt: expiresAt.toLocaleDateString("ru-RU") });
     });
     let response = `📊 Подписки:\n\n✅ Активных: ${activeList.length}\n❌ Истёкших: ${expiredList.length}\n\n`;
-    activeList.forEach((s) => { response += `👤 ${s.userId}\n   📅 До: ${s.expiresAt} (${s.daysLeft} дн.)\n   ${s.isGift ? "🎁" : "💳"}\n\n`; });
+    activeList.forEach((s) => { response += `👤 ${s.userId}\n   📅 До: ${s.expiresAt} (${s.daysLeft} дн.) ${s.isGift ? "🎁" : "💳"}\n\n`; });
+    expiredList.slice(0, 5).forEach((s) => { response += `👤 ${s.userId} — ${s.expiresAt}\n`; });
     bot.sendMessage(msg.chat.id, response || "Подписчиков нет.");
   } catch (err) { bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`); }
 });
@@ -436,12 +378,16 @@ bot.on("successful_payment", async (msg) => {
   } catch (err) { console.log("Ошибка активации:", err.message); }
 });
 
-// ============ НАПОМИНАНИЯ ============
+// ============ ПРОВЕРКА НАПОМИНАНИЙ ============
 
 async function checkReminders() {
   try {
     const now = new Date();
-    const q = query(collection(db, "tasks"), where("isSent", "==", false), where("reminderAt", "<=", Timestamp.fromDate(now)));
+    const q = query(
+      collection(db, "tasks"),
+      where("isSent", "==", false),
+      where("reminderAt", "<=", Timestamp.fromDate(now))
+    );
     const snapshot = await getDocs(q);
 
     for (const documentSnapshot of snapshot.docs) {
@@ -493,13 +439,19 @@ async function createNextDailyTask(task) {
     if (exists) return;
 
     await addDoc(collection(db, "tasks"), {
-      userId: task.userId, taskId: `daily_${Date.now()}`,
-      title: task.title, description: task.description || "",
-      dueDate: nextDate.toISOString(), priority: task.priority || "medium",
-      status: "todo", createdAt: new Date().toISOString(),
-      isSent: false, reminderAt: Timestamp.fromDate(nextDate), repeat: "daily",
+      userId: task.userId,
+      taskId: `daily_${Date.now()}`,
+      title: task.title,
+      description: task.description || "",
+      dueDate: nextDate.toISOString(),
+      priority: task.priority || "medium",
+      status: "todo",
+      createdAt: new Date().toISOString(),
+      isSent: false,
+      reminderAt: Timestamp.fromDate(nextDate),
+      repeat: "daily",
     });
-  } catch (err) { console.log(`Ошибка создания повторяющейся задачи: ${err.message}`); }
+  } catch (err) { console.log(`Ошибка повторяющейся задачи: ${err.message}`); }
 }
 
 async function checkSubscriptions() {
@@ -512,13 +464,22 @@ async function checkSubscriptions() {
       const expiresAt = sub.expiresAt.toDate();
       const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
       if (daysLeft === 3 && !sub.notified3days) {
-        try { await bot.sendMessage(sub.userId, `⚠️ Подписка заканчивается через 3 дня!\n\nНапиши /subscribe для продления 🚀`); await updateDoc(doc(db, "subscriptions", subDoc.id), { notified3days: true }); } catch {}
+        try {
+          await bot.sendMessage(sub.userId, `⚠️ Подписка заканчивается через 3 дня!\n\nНапиши /subscribe для продления 🚀`);
+          await updateDoc(doc(db, "subscriptions", subDoc.id), { notified3days: true });
+        } catch {}
       }
       if (daysLeft === 1 && !sub.notified1day) {
-        try { await bot.sendMessage(sub.userId, `🚨 Подписка заканчивается ЗАВТРА!\n\nНапиши /subscribe ⚡`); await updateDoc(doc(db, "subscriptions", subDoc.id), { notified1day: true }); } catch {}
+        try {
+          await bot.sendMessage(sub.userId, `🚨 Подписка заканчивается ЗАВТРА!\n\nНапиши /subscribe ⚡`);
+          await updateDoc(doc(db, "subscriptions", subDoc.id), { notified1day: true });
+        } catch {}
       }
       if (daysLeft <= 0 && sub.isActive) {
-        try { await updateDoc(doc(db, "subscriptions", subDoc.id), { isActive: false }); await bot.sendMessage(sub.userId, `❌ Подписка истекла.\n\nНапиши /subscribe для продления.`); } catch {}
+        try {
+          await updateDoc(doc(db, "subscriptions", subDoc.id), { isActive: false });
+          await bot.sendMessage(sub.userId, `❌ Подписка истекла.\n\nНапиши /subscribe для продления.`);
+        } catch {}
       }
     }
   } catch (err) { console.log("Ошибка проверки подписок:", err.message); }
@@ -587,6 +548,7 @@ async function cleanupOldDoneTasks() {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const usersSnap = await getDocs(collection(db, "users"));
+
     for (const userDoc of usersSnap.docs) {
       const userId = userDoc.id;
       try {
@@ -600,15 +562,20 @@ async function cleanupOldDoneTasks() {
       } catch {}
     }
 
-    // Чистим старые ai_requests и ai_responses
+    // Чистим старые ai_requests/responses
     try {
       const twoDaysAgo = new Date();
       twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-      const aiRequestsSnap = await getDocs(query(collection(db, "ai_requests"), where("status", "==", "done")));
-      for (const d of aiRequestsSnap.docs) {
+      const aiSnap = await getDocs(query(collection(db, "ai_requests"), where("status", "==", "done")));
+      for (const d of aiSnap.docs) {
         const data = d.data();
         if (data.completedAt && new Date(data.completedAt) < twoDaysAgo) {
-          try { await deleteDoc(doc(db, "ai_requests", d.id)); await deleteDoc(doc(db, "ai_responses", d.id)); } catch {}
+          try {
+            await Promise.all([
+              deleteDoc(doc(db, "ai_requests", d.id)),
+              deleteDoc(doc(db, "ai_responses", d.id)),
+            ]);
+          } catch {}
         }
       }
     } catch {}
