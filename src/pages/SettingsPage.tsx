@@ -37,18 +37,14 @@ export default function SettingsPage() {
   const modalRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
-  // Загружаем статус подписки
   useEffect(() => {
     const id = getTelegramUserId();
     setUserId(id);
     setSubLoading(true);
-
-    // Используем checkSubscription для точного статуса
     Promise.all([
       getSubscriptionInfo(id),
       checkSubscription(id),
     ]).then(([info, isActive]) => {
-      // Синхронизируем — если checkSubscription говорит true, используем это
       setSubInfo({
         isActive: isActive || info.isActive,
         expiresAt: info.expiresAt,
@@ -60,7 +56,6 @@ export default function SettingsPage() {
     });
   }, []);
 
-  // Блокируем скролл фона при открытом модале
   useEffect(() => {
     if (showAddCategory) {
       document.body.style.overflow = "hidden";
@@ -99,6 +94,15 @@ export default function SettingsPage() {
     tg?.openTelegramLink("https://t.me/aiplannerrubot");
   };
 
+  const openChannel = () => {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink("https://t.me/miniapcortexai");
+    } else {
+      window.open("https://t.me/miniapcortexai", "_blank");
+    }
+  };
+
   return (
     <div style={{ paddingTop: "8px", paddingBottom: "20px" }}>
 
@@ -108,13 +112,11 @@ export default function SettingsPage() {
 
       {/* ===== ПОДПИСКА ===== */}
       <SectionTitle>{ru ? "Подписка" : "Subscription"}</SectionTitle>
-
       <div style={{
         backgroundColor: subInfo.isActive ? "rgba(34,197,94,0.08)" : "rgba(255,255,255,0.05)",
         border: subInfo.isActive ? "1px solid rgba(34,197,94,0.2)" : "1px solid rgba(255,255,255,0.08)",
         borderRadius: "16px", padding: "16px", marginBottom: "20px",
       }}>
-
         {subLoading ? (
           <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
             {ru ? "Проверяем подписку..." : "Checking subscription..."}
@@ -153,7 +155,6 @@ export default function SettingsPage() {
               </div>
             )}
 
-            {/* Кнопка — всегда видна */}
             <button
               onClick={openSubscribe}
               style={{
@@ -175,6 +176,58 @@ export default function SettingsPage() {
           </>
         )}
       </div>
+
+      {/* ===== TELEGRAM КАНАЛ ===== */}
+      <SectionTitle>📢 {ru ? "Новости" : "News"}</SectionTitle>
+      <button
+        onClick={openChannel}
+        style={{
+          width: "100%",
+          height: "56px",
+          borderRadius: "14px",
+          border: "1px solid rgba(59,130,246,0.25)",
+          backgroundColor: "rgba(59,130,246,0.08)",
+          fontSize: "14px",
+          fontWeight: 500,
+          color: "#60a5fa",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-start",
+          gap: "12px",
+          paddingLeft: "16px",
+          paddingRight: "16px",
+          marginBottom: "20px",
+          transition: "all 0.15s ease",
+          boxSizing: "border-box" as const,
+        }}
+      >
+        {/* Telegram иконка */}
+        <div style={{
+          width: "36px", height: "36px", borderRadius: "50%",
+          backgroundColor: "#2AABEE",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          flexShrink: 0,
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+          </svg>
+        </div>
+
+        <div style={{ textAlign: "left", flex: 1 }}>
+          <p style={{ fontSize: "14px", fontWeight: 600, color: "#60a5fa", margin: 0 }}>
+            {ru ? "Канал CortexAI" : "CortexAI Channel"}
+          </p>
+          <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+            {ru ? "Новости и обновления приложения" : "App news and updates"}
+          </p>
+        </div>
+
+        {/* Стрелка */}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </button>
 
       {/* ===== РАЗДЕЛЫ ===== */}
       <SectionTitle>{ru ? "Мои разделы" : "My sections"}</SectionTitle>
@@ -347,7 +400,6 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            {/* Иконки */}
             <div style={{ marginBottom: "12px" }}>
               <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0" }}>
                 {ru ? "Иконка" : "Icon"}
@@ -370,7 +422,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Название */}
             <div style={{ marginBottom: "12px" }}>
               <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 6px 0" }}>
                 {ru ? "Название" : "Name"}
@@ -394,7 +445,6 @@ export default function SettingsPage() {
               />
             </div>
 
-            {/* Цвет */}
             <div style={{ marginBottom: "16px" }}>
               <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0" }}>
                 {ru ? "Цвет" : "Color"}
