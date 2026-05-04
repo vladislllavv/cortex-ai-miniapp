@@ -31,6 +31,9 @@ const bot = new TelegramBot(token, { polling: true });
 
 const ADMINS = ["56733076"];
 
+// Защита от дублирования уведомлений
+const sentNotifications = new Set();
+
 bot.setMyCommands([
   { command: "start", description: "Запустить бота" },
   { command: "subscribe", description: "Купить подписку" },
@@ -145,25 +148,21 @@ bot.onText(/\/subscribers/, async (msg) => {
     });
 
     let response = `📊 Статистика подписок:\n\n✅ Активных: ${activeList.length}\n❌ Истёкших: ${expiredList.length}\n\n`;
-
     if (activeList.length > 0) {
       response += `━━━ АКТИВНЫЕ ━━━\n`;
       activeList.forEach((s) => {
         response += `👤 ${s.userId}\n   📅 До: ${s.expiresAt} (${s.daysLeft} дн.)\n   ${s.isGift ? "🎁 Подарочная" : "💳 Платная"}\n\n`;
       });
     }
-
     if (expiredList.length > 0) {
       response += `━━━ ИСТЁКШИЕ (последние 10) ━━━\n`;
       expiredList.slice(0, 10).forEach((s) => {
         response += `👤 ${s.userId} — ${s.expiresAt}\n`;
       });
     }
-
     if (activeList.length === 0 && expiredList.length === 0) {
       response += "Подписчиков пока нет.";
     }
-
     bot.sendMessage(msg.chat.id, response);
   } catch (err) {
     bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
@@ -265,6 +264,9 @@ bot.on("successful_payment", async (msg) => {
   }
 });
 
+// ============ ПРОВЕРКА НАПОМИНАНИЙ ============
+// Защита от дублирования — помечаем задачи атомарно
+
 async function checkReminders() {
   try {
     const now = new Date();
@@ -276,10 +278,21 @@ async function checkReminders() {
     const snapshot = await getDocs(q);
 
     for (const documentSnapshot of snapshot.docs) {
+      const taskId = documentSnapshot.id;
+
+      // Защита от дублирования в памяти
+      if (sentNotifications.has(taskId)) continue;
+      sentNotifications.add(taskId);
+
       const task = documentSnapshot.data();
+
       try {
+        // Сначала помечаем как отправленное — АТОМАРНО
+        // Это предотвращает отправку несколькими параллельными вызовами
+        await updateDoc(doc(db, "tasks", taskId), { isSent: true });
+
         if (task.status === "done") {
-          await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
+          console.log(`Задача выполнена — пропускаем: ${task.title}`);
           continue;
         }
 
@@ -288,8 +301,6 @@ async function checkReminders() {
           `🔔 Напоминание!\n\n📌 ${task.title}${task.description ? `\n${task.description}` : ""}${task.repeat === "daily" ? "\n\n🔁 Ежедневная задача" : ""}`
         );
 
-        await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
-
         if (task.repeat === "daily" && task.status !== "done") {
           await createNextDailyTask(task);
         }
@@ -297,10 +308,12 @@ async function checkReminders() {
         console.log(`✅ Уведомление: ${task.userId} — ${task.title}`);
       } catch (err) {
         console.log(`❌ Ошибка отправки: ${err.message}`);
-        try {
-          await updateDoc(doc(db, "tasks", documentSnapshot.id), { isSent: true });
-        } catch {}
       }
+    }
+
+    // Очищаем кэш каждые 1000 записей
+    if (sentNotifications.size > 1000) {
+      sentNotifications.clear();
     }
   } catch (err) {
     console.log(`Ошибка проверки напоминаний: ${err.message}`);
@@ -314,6 +327,7 @@ async function createNextDailyTask(task) {
     nextDate.setDate(nextDate.getDate() + 1);
     const nextDateStr = nextDate.toISOString().split("T")[0];
 
+    // Проверяем нет ли уже задачи на завтра
     const existingQuery = query(
       collection(db, "tasks"),
       where("userId", "==", task.userId),
@@ -437,6 +451,11 @@ async function sendEveningMotivation() {
     if (now.getHours() !== 21) return;
 
     const todayStr = now.toISOString().split("T")[0];
+    const motivationKey = `motivation_${todayStr}`;
+
+    // Отправляем только один раз в день
+    if (sentNotifications.has(motivationKey)) return;
+    sentNotifications.add(motivationKey);
 
     const motivations = [
       "🌟 Каждый шаг вперёд — это победа. Отдохни и завтра снова в бой!",
@@ -505,6 +524,29 @@ async function cleanupOldDoneTasks() {
         }
       } catch {}
     }
+
+    // Также чистим старые записи из /tasks
+    try {
+      const oldTasksQuery = query(
+        collection(db, "tasks"),
+        where("isSent", "==", true)
+      );
+      const oldTasksSnap = await getDocs(oldTasksQuery);
+      const twoDaysAgo = new Date();
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+      for (const taskDoc of oldTasksSnap.docs) {
+        const data = taskDoc.data();
+        if (data.reminderAt) {
+          const reminderAt = data.reminderAt.toDate();
+          if (reminderAt < twoDaysAgo) {
+            try {
+              await deleteDoc(doc(db, "tasks", taskDoc.id));
+            } catch {}
+          }
+        }
+      }
+    } catch {}
 
     console.log("✅ Очистка старых задач завершена");
   } catch (err) {
