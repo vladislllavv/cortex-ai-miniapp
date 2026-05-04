@@ -8,21 +8,18 @@ import {
   isHoliday,
   isWeekend,
   getHolidayName,
-  Task,
 } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
 import { Send, Bot, Mic, MicOff, Copy, Check } from "lucide-react";
 import { db } from "@/lib/firebase";
-import {
-  doc,
-  setDoc,
-  onSnapshot,
-  collection,
-} from "firebase/firestore";
+import { doc, setDoc } from "firebase/firestore";
 
 const ASSISTANT_NAME_KEY = "cortex-assistant-name";
 const AI_FREE_LIMIT = 5;
 const AI_USAGE_KEY = "cortex-ai-usage";
+
+// URL Cloudflare Worker — ключ скрыт на сервере Cloudflare
+const AI_WORKER_URL = "https://ancient-river-8a20.bubo-buboff.workers.dev";
 
 function getAssistantName(): string {
   return localStorage.getItem(ASSISTANT_NAME_KEY) || "CortexAI";
@@ -50,16 +47,32 @@ interface Message {
   content: string;
 }
 
+function parseTaskFromResponse(response: string): {
+  text: string;
+  task: { title: string; dueDate?: string; priority: string; repeat: string } | null;
+} {
+  const taskJsonMatch = response.match(/TASK_JSON:(\{[^}]+\})/);
+  if (taskJsonMatch) {
+    try {
+      const task = JSON.parse(taskJsonMatch[1]);
+      const text = response.replace(/TASK_JSON:\{[^}]+\}/, "").trim();
+      return { text, task };
+    } catch {}
+  }
+  return { text: response, task: null };
+}
+
 const DEFAULT_MESSAGE = (ru: boolean, name: string): Message => ({
   role: "assistant",
   content: ru
-    ? `Привет! 👋 Я ${name}, твой AI ассистент на базе Llama 3.3.\n\nМогу помочь:\n• Создать задачу: "напомни завтра в 10 встреча"\n• Показать план: "что у меня сегодня?"\n• Дать совет по продуктивности\n• Снизить стресс 🧘\n• 🎤 Нажми микрофон для голосового ввода\n\n⚠️ Задачи с датой автоматически попадают в список и календарь`
-    : `Hi! 👋 I'm ${name}, your AI assistant powered by Llama 3.3.\n\nI can help:\n• Create tasks: "remind me tomorrow at 10 meeting"\n• Show plan: "what do I have today?"\n• Give productivity advice\n• Reduce stress 🧘\n• 🎤 Tap mic for voice input\n\n⚠️ Tasks with dates automatically appear in your list and calendar`,
+    ? `Привет! 👋 Я ${name}, твой AI ассистент на базе Llama 3.3.\n\nМогу помочь:\n• Создать задачу: "напомни завтра в 10 встреча"\n• Показать план: "что у меня сегодня?"\n• Дать совет по продуктивности\n• Снизить стресс 🧘\n• 🎤 Голосовой ввод\n\n⚠️ Задачи с датой автоматически попадают в список и календарь`
+    : `Hi! 👋 I'm ${name}, your AI assistant powered by Llama 3.3.\n\nI can help:\n• Create tasks: "remind me tomorrow at 10 meeting"\n• Show plan: "what do I have today?"\n• Give productivity advice\n• Reduce stress 🧘\n• 🎤 Voice input\n\n⚠️ Tasks with dates automatically appear in your list and calendar`,
 });
 
 export default function AiProcessPage() {
   const language = useI18nStore((state) => state.language);
   const tasks = useTaskStore((state) => state.tasks);
+  const addTask = useTaskStore((state) => state.addTask);
   const ru = language === "ru";
 
   const [assistantName, setAssistantName] = useState(getAssistantName());
@@ -82,9 +95,6 @@ export default function AiProcessPage() {
   const recognitionRef = useRef<any>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const pendingRequestRef = useRef<string | null>(null);
-
-  const AI_FREE_LIMIT_VAL = AI_FREE_LIMIT;
 
   useEffect(() => {
     const userId = getTelegramUserId();
@@ -122,50 +132,6 @@ export default function AiProcessPage() {
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, []);
-
-  // Слушаем ответы от бота
-  useEffect(() => {
-    const userId = getTelegramUserId();
-    if (userId === "unknown") return;
-
-    const unsubscribe = onSnapshot(
-      collection(db, "ai_responses"),
-      (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type !== "added" && change.type !== "modified") return;
-
-          const data = change.doc.data();
-          const requestId = change.doc.id;
-
-          if (data.userId !== userId) return;
-          if (data.status !== "done" && data.status !== "error") return;
-          if (requestId !== pendingRequestRef.current) return;
-
-          pendingRequestRef.current = null;
-          setLoading(false);
-          sendingRef.current = false;
-
-          // Если AI создал задачу — обновляем store
-          if (data.taskCreated) {
-            const store = useTaskStore.getState();
-            const existing = store.tasks.find((t) => t.id === data.taskCreated.id);
-            if (!existing) {
-              // Задача уже сохранена ботом в Firebase
-              // Она появится через startSync автоматически
-              console.log("Задача создана AI:", data.taskCreated.title);
-            }
-          }
-
-          setMessages((prev) => [
-            ...prev,
-            { role: "assistant", content: data.message },
-          ]);
-        });
-      }
-    );
-
-    return () => unsubscribe();
   }, []);
 
   const startListening = () => {
@@ -230,23 +196,14 @@ export default function AiProcessPage() {
     const messageText = (text || input).trim();
     if (!messageText || loading) return;
 
-    if (hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT_VAL) {
+    if (hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT) {
       const tg = (window as any).Telegram?.WebApp;
       tg?.showAlert(
         ru
-          ? `Лимит ${AI_FREE_LIMIT_VAL} запросов в день исчерпан 🤖\n\nОформи подписку (100 Stars/мес).\n\nНапиши боту /subscribe`
-          : `Daily limit of ${AI_FREE_LIMIT_VAL} requests reached.\n\nGet subscription.\n\nSend /subscribe`
+          ? `Лимит ${AI_FREE_LIMIT} запросов в день 🤖\n\nОформи подписку (100 Stars/мес).\n\nНапиши боту /subscribe`
+          : `Daily limit of ${AI_FREE_LIMIT} requests reached.\n\nGet subscription.\n\nSend /subscribe`
       );
       tg?.openTelegramLink("https://t.me/aiplannerrubot");
-      return;
-    }
-
-    const userId = getTelegramUserId();
-    if (userId === "unknown") {
-      setMessages((prev) => [...prev, {
-        role: "assistant",
-        content: ru ? "⚠️ Не удалось определить пользователя. Открой приложение через бота." : "⚠️ Could not identify user. Open app via bot.",
-      }]);
       return;
     }
 
@@ -262,53 +219,119 @@ export default function AiProcessPage() {
     }
 
     try {
-      // Формируем историю для контекста (последние 10 сообщений)
-      const history = messages
-        .slice(-10)
-        .filter((m) => m.role !== "assistant" || messages.indexOf(m) > 0)
-        .map((m) => ({ role: m.role, content: m.content }));
+      const now = new Date();
+      const todayStr = now.toISOString().split("T")[0];
+      const activeTasks = tasks.filter((t) => t.status !== "done").slice(0, 8);
 
+      // Системный промпт
+      const systemPrompt = `Ты AI ассистент планировщика CortexAI. Время: ${now.toLocaleString("ru-RU")}.
+
+Активные задачи: ${activeTasks.length > 0
+        ? activeTasks.map(t => `${t.title}${t.dueDate ? ` (${new Date(t.dueDate).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })})` : ""}`).join(", ")
+        : "нет задач"}
+
+Если пользователь хочет создать задачу/напоминание — добавь в конец:
+TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","priority":"medium","repeat":"none"}
+
+Правила:
+- Отвечай коротко (2-3 предложения)
+- ${ru ? "Только на русском" : "Only in English"}
+- Используй эмодзи
+- priority: low/medium/high, repeat: none/daily
+- Если нет времени — спроси когда напомнить`;
+
+      // История — последние 6 сообщений
+      const history = messages.slice(-6).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
       history.push({ role: "user", content: messageText });
 
-      // Активные задачи для контекста
-      const activeTasks = tasks
-        .filter((t) => t.status !== "done")
-        .slice(0, 10)
-        .map((t) => ({
-          title: t.title,
-          dueDate: t.dueDate || null,
-          priority: t.priority,
-        }));
-
-      // Создаём уникальный ID запроса
-      const requestId = `req_${userId}_${Date.now()}`;
-      pendingRequestRef.current = requestId;
-
-      // Записываем запрос в Firebase — бот его подхватит
-      await setDoc(doc(db, "ai_requests", requestId), {
-        userId,
-        requestId,
-        message: messageText,
-        history,
-        language,
-        tasks: activeTasks,
-        status: "pending",
-        createdAt: new Date().toISOString(),
+      // Запрос к Cloudflare Worker — быстро и безопасно
+      const startTime = Date.now();
+      const response = await fetch(AI_WORKER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: history, systemPrompt }),
       });
 
+      console.log(`⏱ AI ответил за ${Date.now() - startTime}ms`);
+
+      if (!response.ok) {
+        throw new Error(`Worker error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      const aiResponse = data.content;
+      const { text, task } = parseTaskFromResponse(aiResponse);
+
+      // Если AI создал задачу — добавляем в store
+      if (task && task.title && task.title.length > 1) {
+        await addTask({
+          title: task.title,
+          dueDate: task.dueDate || undefined,
+          priority: (task.priority || "medium") as any,
+          status: "todo",
+          isAiCreated: true,
+          repeat: (task.repeat || "none") as any,
+          type: "task",
+          description: "",
+          items: [],
+        });
+
+        // Если есть дата — сохраняем в Firebase для уведомлений бота
+        if (task.dueDate) {
+          const userId = getTelegramUserId();
+          if (userId !== "unknown") {
+            const { Timestamp, addDoc, collection } = await import("firebase/firestore");
+            const dueDate = new Date(task.dueDate);
+            if (!isNaN(dueDate.getTime())) {
+              addDoc(collection(db, "tasks"), {
+                userId,
+                taskId: `ai_${Date.now()}`,
+                title: task.title,
+                description: "",
+                dueDate: task.dueDate,
+                priority: task.priority || "medium",
+                status: "todo",
+                createdAt: new Date().toISOString(),
+                isSent: false,
+                reminderAt: Timestamp.fromDate(dueDate),
+                repeat: task.repeat || "none",
+                type: "task",
+              }).catch(console.error);
+            }
+          }
+        }
+
+        const confirmMsg = ru
+          ? `✅ Задача создана: "${task.title}"\n\n${text}`
+          : `✅ Task created: "${task.title}"\n\n${text}`;
+
+        setMessages((prev) => [...prev, { role: "assistant", content: confirmMsg }]);
+      } else {
+        setMessages((prev) => [...prev, { role: "assistant", content: text }]);
+      }
     } catch (err: any) {
-      console.error("AI request error:", err);
+      console.error("AI error:", err);
       setMessages((prev) => [...prev, {
         role: "assistant",
-        content: ru ? "⚠️ Ошибка отправки запроса. Попробуй ещё раз." : "⚠️ Request failed. Try again.",
+        content: ru
+          ? "⚠️ Ошибка подключения к AI. Попробуй ещё раз."
+          : "⚠️ AI connection error. Please try again.",
       }]);
+    } finally {
       setLoading(false);
       sendingRef.current = false;
-      pendingRequestRef.current = null;
     }
   };
 
-  const isLimited = hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT_VAL;
+  const isLimited = hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 120px)", maxHeight: "calc(100vh - 120px)", overflow: "hidden" }}>
@@ -322,7 +345,7 @@ export default function AiProcessPage() {
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
             <p style={{ fontSize: "15px", fontWeight: 700, color: "white", margin: 0 }}>{assistantName}</p>
             <span style={{ fontSize: "10px", backgroundColor: "rgba(59,130,246,0.2)", color: "#60a5fa", padding: "1px 6px", borderRadius: "8px" }}>
-              Llama 3.3
+              Llama 3.3 ⚡
             </span>
             <button onClick={() => { setNewName(assistantName); setShowNameEdit(true); }} style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", fontSize: "12px", color: "rgba(255,255,255,0.3)" }}>✏️</button>
           </div>
@@ -330,7 +353,7 @@ export default function AiProcessPage() {
             {hasSubscription === null ? (ru ? "Загрузка..." : "Loading...") :
               hasSubscription ? (ru ? "Подписка активна ✅" : "Subscription active ✅") :
               isLimited ? (ru ? "Лимит исчерпан" : "Limit reached") :
-              ru ? `${AI_FREE_LIMIT_VAL - aiUsageCount} из ${AI_FREE_LIMIT_VAL} запросов` : `${AI_FREE_LIMIT_VAL - aiUsageCount} of ${AI_FREE_LIMIT_VAL} requests`}
+              ru ? `${AI_FREE_LIMIT - aiUsageCount} из ${AI_FREE_LIMIT} запросов` : `${AI_FREE_LIMIT - aiUsageCount} of ${AI_FREE_LIMIT} requests`}
           </p>
         </div>
       </div>
@@ -350,7 +373,7 @@ export default function AiProcessPage() {
       {/* Лимит */}
       {isLimited && (
         <div style={{ backgroundColor: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px", flexShrink: 0, textAlign: "center" }}>
-          <p style={{ fontSize: "12px", color: "#fca5a5", margin: "0 0 6px 0" }}>{ru ? `Лимит ${AI_FREE_LIMIT_VAL} запросов в день 🤖` : `Daily limit of ${AI_FREE_LIMIT_VAL} requests 🤖`}</p>
+          <p style={{ fontSize: "12px", color: "#fca5a5", margin: "0 0 6px 0" }}>{ru ? `Лимит ${AI_FREE_LIMIT} запросов в день 🤖` : `Daily limit of ${AI_FREE_LIMIT} requests 🤖`}</p>
           <button onClick={() => { const tg = (window as any).Telegram?.WebApp; tg?.openTelegramLink("https://t.me/aiplannerrubot"); }} style={{ height: "30px", paddingLeft: "14px", paddingRight: "14px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
             {ru ? "Оформить подписку" : "Get subscription"}
           </button>
