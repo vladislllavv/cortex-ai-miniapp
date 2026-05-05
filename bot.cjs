@@ -33,18 +33,43 @@ const bot = new TelegramBot(token, { polling: true });
 const ADMINS = ["56733076"];
 const sentNotifications = new Set();
 
-// ЮКасса provider_token (тестовый)
 const YOOKASSA_PROVIDER_TOKEN = process.env.YOOKASSA_PROVIDER_TOKEN || "381764678:TEST:177451";
+
+// Варианты подписки
+const SUBSCRIPTION_PLANS = {
+  month_1: {
+    label: "1 месяц",
+    days: 30,
+    amount: 10000,      // 100 руб в копейках
+    stars: 100,
+    emoji: "📅",
+    description: "Подписка CortexAI на 1 месяц",
+  },
+  month_6: {
+    label: "6 месяцев",
+    days: 180,
+    amount: 40000,      // 400 руб в копейках
+    stars: 400,
+    emoji: "🗓",
+    description: "Подписка CortexAI на 6 месяцев — экономия 200₽",
+  },
+  month_12: {
+    label: "12 месяцев",
+    days: 365,
+    amount: 90000,      // 900 руб в копейках
+    stars: 900,
+    emoji: "🏆",
+    description: "Подписка CortexAI на 12 месяцев — экономия 300₽",
+  },
+};
 
 bot.setMyCommands([
   { command: "start", description: "Запустить бота" },
-  { command: "subscribe", description: "Купить подписку (Stars)" },
-  { command: "subscribe_yk", description: "Купить подписку (ЮКасса)" },
+  { command: "subscribe", description: "Купить подписку" },
   { command: "myid", description: "Узнать свой ID" },
 ]);
 
 console.log("Бот запущен ✅");
-console.log("ЮКасса provider_token:", YOOKASSA_PROVIDER_TOKEN ? "задан ✅" : "не задан ❌");
 
 function isAdmin(userId) {
   return ADMINS.includes(String(userId));
@@ -76,8 +101,7 @@ bot.onText(/\/start/, async (msg) => {
     "Привет! Я буду напоминать тебе о задачах 🔔\n\n" +
     "Команды:\n" +
     "/start — запуск\n" +
-    "/subscribe — подписка через Stars\n" +
-    "/subscribe_yk — подписка через ЮКасса\n" +
+    "/subscribe — купить подписку\n" +
     "/myid — узнать свой ID"
   );
 });
@@ -108,7 +132,7 @@ bot.onText(/\/revoke (.+)/, async (msg, match) => {
       userId: String(targetId), isActive: false, updatedAt: Timestamp.fromDate(new Date()),
     });
     bot.sendMessage(msg.chat.id, `✅ Подписка отключена у ${targetId}`);
-    try { bot.sendMessage(targetId, "❌ Твоя подписка CortexAI была отключена.\n\nНапиши /subscribe для оформления."); } catch {}
+    try { bot.sendMessage(targetId, "❌ Твоя подписка CortexAI была отключена."); } catch {}
   } catch (err) { bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`); }
 });
 
@@ -156,34 +180,14 @@ bot.onText(/\/stats/, async (msg) => {
 bot.onText(/\/help/, (msg) => {
   if (!isAdmin(String(msg.chat.id))) return;
   bot.sendMessage(msg.chat.id,
-    `🛠 Команды:\n\n` +
-    `/gift [ID] — выдать подписку\n` +
-    `/revoke [ID] — отозвать\n` +
-    `/subscribers — список\n` +
-    `/stats — статистика\n` +
-    `/myid — мой ID`
+    `🛠 Команды:\n\n/gift [ID] — выдать подписку\n/revoke [ID] — отозвать\n/subscribers — список\n/stats — статистика\n/myid — мой ID`
   );
 });
 
-// ===== ПОДПИСКА ЧЕРЕЗ TELEGRAM STARS =====
-bot.onText(/\/subscribe$/, async (msg) => {
-  const chatId = msg.chat.id;
-  if (isAdmin(String(chatId))) { bot.sendMessage(chatId, "👑 Ты администратор — подписка бесплатна."); return; }
-  try {
-    await bot.sendInvoice(
-      chatId,
-      "Подписка CortexAI 🚀",
-      "Безлимитные задачи + AI ассистент на 30 дней",
-      `sub_stars_${chatId}`,
-      "",
-      "XTR",
-      [{ label: "Подписка на 30 дней", amount: 100 }]
-    );
-  } catch (err) { bot.sendMessage(chatId, "Ошибка при создании счёта. Попробуй позже."); }
-});
+// ===== ГЛАВНАЯ КОМАНДА ПОДПИСКИ =====
+// Показывает выбор тарифа с кнопками
 
-// ===== ПОДПИСКА ЧЕРЕЗ ЮКАССА =====
-bot.onText(/\/subscribe_yk$/, async (msg) => {
+bot.onText(/\/subscribe$/, async (msg) => {
   const chatId = msg.chat.id;
 
   if (isAdmin(String(chatId))) {
@@ -191,97 +195,170 @@ bot.onText(/\/subscribe_yk$/, async (msg) => {
     return;
   }
 
-  if (!YOOKASSA_PROVIDER_TOKEN) {
-    bot.sendMessage(chatId, "❌ ЮКасса не настроена.");
-    return;
+  await bot.sendMessage(
+    chatId,
+    "💎 Выбери тариф подписки CortexAI:\n\n" +
+    "📅 1 месяц — 100 ₽\n" +
+    "🗓 6 месяцев — 400 ₽ (экономия 200₽)\n" +
+    "🏆 12 месяцев — 900 ₽ (экономия 300₽)\n\n" +
+    "Все тарифы включают:\n" +
+    "✅ Безлимитные задачи\n" +
+    "✅ AI ассистент без лимитов\n" +
+    "✅ Напоминания и уведомления\n" +
+    "✅ Дни рождения в облаке",
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "📅 1 мес — 100₽", callback_data: "sub_yk_month_1" },
+          ],
+          [
+            { text: "🗓 6 мес — 400₽", callback_data: "sub_yk_month_6" },
+          ],
+          [
+            { text: "🏆 12 мес — 900₽ 🔥", callback_data: "sub_yk_month_12" },
+          ],
+          [
+            { text: "⭐ Оплата Stars", callback_data: "sub_stars_menu" },
+          ],
+        ],
+      },
+    }
+  );
+});
+
+// ===== ОБРАБОТКА НАЖАТИЙ КНОПОК =====
+
+bot.on("callback_query", async (callbackQuery) => {
+  const chatId = callbackQuery.message.chat.id;
+  const userId = String(chatId);
+  const data = callbackQuery.data;
+
+  // Подтверждаем получение callback
+  await bot.answerCallbackQuery(callbackQuery.id);
+
+  // ЮКасса — выбор тарифа
+  if (data.startsWith("sub_yk_")) {
+    const planKey = data.replace("sub_yk_", "");
+    const plan = SUBSCRIPTION_PLANS[planKey];
+
+    if (!plan) return;
+
+    if (!YOOKASSA_PROVIDER_TOKEN) {
+      await bot.sendMessage(chatId, "❌ ЮКасса не настроена.");
+      return;
+    }
+
+    try {
+      await bot.sendInvoice(
+        chatId,
+        `${plan.emoji} Подписка CortexAI — ${plan.label}`,
+        plan.description,
+        `sub_yk_${planKey}_${userId}_${Date.now()}`,
+        YOOKASSA_PROVIDER_TOKEN,
+        "RUB",
+        [{ label: `Подписка на ${plan.label}`, amount: plan.amount }],
+        {
+          need_email: false,
+          need_phone_number: false,
+          need_shipping_address: false,
+          is_flexible: false,
+        }
+      );
+    } catch (err) {
+      console.log("Ошибка ЮКасса invoice:", err.message);
+      await bot.sendMessage(chatId, `❌ Ошибка создания счёта: ${err.message}`);
+    }
   }
 
-  try {
-    await bot.sendInvoice(
+  // Stars — меню выбора тарифа
+  if (data === "sub_stars_menu") {
+    await bot.sendMessage(
       chatId,
-      // Название товара
-      "Подписка CortexAI 🚀",
-      // Описание
-      "Безлимитные задачи + AI ассистент на 30 дней",
-      // Payload — передаётся в successful_payment
-      `sub_yk_${chatId}_${Date.now()}`,
-      // Provider token ЮКасса
-      YOOKASSA_PROVIDER_TOKEN,
-      // Валюта
-      "RUB",
-      // Цены в копейках (100 рублей = 10000 копеек)
-      [{ label: "Подписка на 30 дней", amount: 10000 }],
+      "⭐ Выбери тариф для оплаты Stars:",
       {
-        // Описание для платёжной формы
-        description: "Подписка CortexAI на 30 дней",
-        // Фото товара (опционально)
-        photo_url: "https://telegra.ph/file/cortexai-placeholder.jpg",
-        photo_width: 512,
-        photo_height: 512,
-        // Нужен ли email
-        need_email: false,
-        // Нужен ли телефон
-        need_phone_number: false,
-        // Нужен ли адрес доставки
-        need_shipping_address: false,
-        // Можно менять цену до оплаты
-        is_flexible: false,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "📅 1 мес — 100 Stars", callback_data: "sub_stars_month_1" }],
+            [{ text: "🗓 6 мес — 400 Stars", callback_data: "sub_stars_month_6" }],
+            [{ text: "🏆 12 мес — 900 Stars 🔥", callback_data: "sub_stars_month_12" }],
+          ],
+        },
       }
     );
-  } catch (err) {
-    console.log("Ошибка ЮКасса invoice:", err.message);
-    bot.sendMessage(chatId, `❌ Ошибка создания счёта: ${err.message}`);
+  }
+
+  // Stars — конкретный тариф
+  if (data.startsWith("sub_stars_")) {
+    const planKey = data.replace("sub_stars_", "");
+    const plan = SUBSCRIPTION_PLANS[planKey];
+
+    if (!plan) return;
+
+    try {
+      await bot.sendInvoice(
+        chatId,
+        `${plan.emoji} Подписка CortexAI — ${plan.label}`,
+        plan.description,
+        `sub_stars_${planKey}_${userId}_${Date.now()}`,
+        "",
+        "XTR",
+        [{ label: `Подписка на ${plan.label}`, amount: plan.stars }]
+      );
+    } catch (err) {
+      console.log("Ошибка Stars invoice:", err.message);
+      await bot.sendMessage(chatId, `❌ Ошибка: ${err.message}`);
+    }
   }
 });
 
 // ===== ОБРАБОТКА ОПЛАТЫ =====
 
-// Подтверждение перед оплатой
 bot.on("pre_checkout_query", async (query) => {
   try {
-    // Всегда подтверждаем — можно добавить проверки
     await bot.answerPreCheckoutQuery(query.id, true);
     console.log(`Pre-checkout: ${query.from.id} — ${query.invoice_payload}`);
   } catch (err) {
     console.log("Ошибка pre_checkout_query:", err.message);
-    try {
-      await bot.answerPreCheckoutQuery(query.id, false, "Ошибка обработки платежа");
-    } catch {}
+    try { await bot.answerPreCheckoutQuery(query.id, false, "Ошибка обработки платежа"); } catch {}
   }
 });
 
-// Успешная оплата (и Stars и ЮКасса)
 bot.on("successful_payment", async (msg) => {
   const userId = String(msg.chat.id);
   const payment = msg.successful_payment;
   const payload = payment?.invoice_payload || "";
 
-  console.log(`✅ Оплата получена: ${userId} — payload: ${payload} — currency: ${payment?.currency} — amount: ${payment?.total_amount}`);
+  console.log(`✅ Оплата: ${userId} — ${payload} — ${payment?.currency} — ${payment?.total_amount}`);
 
   try {
-    // Определяем тип оплаты по payload
-    const isYooKassa = payload.startsWith("sub_yk_");
-    const isStars = payload.startsWith("sub_stars_");
+    // Определяем тариф из payload
+    let days = 30;
+    let planLabel = "1 месяц";
 
-    // Активируем подписку на 30 дней
-    await grantSubscription(userId, 30, false);
+    if (payload.includes("month_6")) { days = 180; planLabel = "6 месяцев"; }
+    else if (payload.includes("month_12")) { days = 365; planLabel = "12 месяцев"; }
+    else if (payload.includes("month_1")) { days = 30; planLabel = "1 месяц"; }
 
-    const currency = payment?.currency === "XTR" ? "Telegram Stars" : "ЮКасса";
-    const amount = payment?.currency === "XTR"
+    await grantSubscription(userId, days, false);
+
+    const isStars = payment?.currency === "XTR";
+    const currency = isStars ? "Telegram Stars" : "ЮКасса";
+    const amount = isStars
       ? `${payment.total_amount} Stars`
       : `${payment.total_amount / 100} ₽`;
 
-    // Уведомляем пользователя
     await bot.sendMessage(
       msg.chat.id,
       `✅ Оплата получена!\n\n` +
       `💳 Способ: ${currency}\n` +
-      `💰 Сумма: ${amount}\n\n` +
-      `🚀 Подписка активирована на 30 дней!\n\n` +
+      `💰 Сумма: ${amount}\n` +
+      `📅 Тариф: ${planLabel}\n\n` +
+      `🚀 Подписка активирована!\n\n` +
       `Теперь доступны:\n` +
       `• Безлимитные задачи\n` +
       `• AI ассистент без лимитов\n` +
-      `• Уведомления о событиях`
+      `• Напоминания и уведомления`
     );
 
     // Уведомляем администратора
@@ -290,9 +367,10 @@ bot.on("successful_payment", async (msg) => {
         await bot.sendMessage(
           adminId,
           `💰 Новая оплата!\n\n` +
-          `👤 Пользователь: ${userId}\n` +
+          `👤 ID: ${userId}\n` +
           `💳 Способ: ${currency}\n` +
           `💰 Сумма: ${amount}\n` +
+          `📅 Тариф: ${planLabel}\n` +
           `📦 Payload: ${payload}`
         );
       } catch {}
@@ -662,7 +740,6 @@ async function cleanupOldDoneTasks() {
   } catch (err) { console.log("Ошибка очистки:", err.message); }
 }
 
-// Запускаем AI слушатель
 startAiListener();
 
 setInterval(checkReminders, 60 * 1000);
