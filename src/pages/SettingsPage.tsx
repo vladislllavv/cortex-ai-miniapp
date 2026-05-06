@@ -89,9 +89,14 @@ export default function SettingsPage() {
     setShowAddCategory(true);
   };
 
+  // Исправленная функция — открывает бота с командой /subscribe
   const openSubscribe = () => {
     const tg = (window as any).Telegram?.WebApp;
-    tg?.openTelegramLink("https://t.me/aiplannerrubot");
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink("https://t.me/aiplannerrubot?start=subscribe");
+    } else {
+      window.open("https://t.me/aiplannerrubot?start=subscribe", "_blank");
+    }
   };
 
   const openChannel = () => {
@@ -155,6 +160,7 @@ export default function SettingsPage() {
               </div>
             )}
 
+            {/* Кнопка подписки — открывает бота с /subscribe */}
             <button
               onClick={openSubscribe}
               style={{
@@ -171,8 +177,17 @@ export default function SettingsPage() {
               <Star size={16} color={subInfo.isActive ? "#4ade80" : "white"} />
               {subInfo.isActive
                 ? (ru ? "Продлить подписку" : "Renew subscription")
-                : (ru ? "Оформить за 100 Stars/мес" : "Subscribe for 100 Stars/mo")}
+                : (ru ? "Оформить подписку" : "Get subscription")}
             </button>
+
+            {/* Тарифы под кнопкой */}
+            {!subInfo.isActive && (
+              <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.3)", margin: 0, textAlign: "center" }}>
+                  {ru ? "Тарифы: 1 мес — 100₽ • 6 мес — 400₽ • 12 мес — 900₽" : "Plans: 1 mo — 100₽ • 6 mo — 400₽ • 12 mo — 900₽"}
+                </p>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -182,38 +197,21 @@ export default function SettingsPage() {
       <button
         onClick={openChannel}
         style={{
-          width: "100%",
-          height: "56px",
-          borderRadius: "14px",
+          width: "100%", height: "56px", borderRadius: "14px",
           border: "1px solid rgba(59,130,246,0.25)",
           backgroundColor: "rgba(59,130,246,0.08)",
-          fontSize: "14px",
-          fontWeight: 500,
-          color: "#60a5fa",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-start",
-          gap: "12px",
-          paddingLeft: "16px",
-          paddingRight: "16px",
-          marginBottom: "20px",
-          transition: "all 0.15s ease",
-          boxSizing: "border-box" as const,
+          fontSize: "14px", fontWeight: 500, color: "#60a5fa",
+          cursor: "pointer", display: "flex", alignItems: "center",
+          justifyContent: "flex-start", gap: "12px",
+          paddingLeft: "16px", paddingRight: "16px",
+          marginBottom: "20px", boxSizing: "border-box" as const,
         }}
       >
-        {/* Telegram иконка */}
-        <div style={{
-          width: "36px", height: "36px", borderRadius: "50%",
-          backgroundColor: "#2AABEE",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          flexShrink: 0,
-        }}>
+        <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#2AABEE", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
             <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
           </svg>
         </div>
-
         <div style={{ textAlign: "left", flex: 1 }}>
           <p style={{ fontSize: "14px", fontWeight: 600, color: "#60a5fa", margin: 0 }}>
             {ru ? "Канал CortexAI" : "CortexAI Channel"}
@@ -222,8 +220,6 @@ export default function SettingsPage() {
             {ru ? "Новости и обновления приложения" : "App news and updates"}
           </p>
         </div>
-
-        {/* Стрелка */}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="9 18 15 12 9 6" />
         </svg>
@@ -231,17 +227,9 @@ export default function SettingsPage() {
 
       {/* ===== РАЗДЕЛЫ ===== */}
       <SectionTitle>{ru ? "Мои разделы" : "My sections"}</SectionTitle>
-      <div style={{
-        backgroundColor: "rgba(255,255,255,0.05)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: "16px", padding: "14px", marginBottom: "20px",
-      }}>
+      <div style={{ backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "16px", padding: "14px", marginBottom: "20px" }}>
         {categories.map((cat) => (
-          <div key={cat.id} style={{
-            display: "flex", alignItems: "center", gap: "10px",
-            padding: "8px 0",
-            borderBottom: "1px solid rgba(255,255,255,0.05)",
-          }}>
+          <div key={cat.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
             <span style={{ fontSize: "18px" }}>{cat.icon}</span>
             <div style={{ width: "10px", height: "10px", borderRadius: "50%", backgroundColor: cat.color, flexShrink: 0 }} />
             <span style={{ fontSize: "14px", color: "white", flex: 1 }}>{cat.name}</span>
@@ -255,7 +243,6 @@ export default function SettingsPage() {
             )}
           </div>
         ))}
-
         <button
           onClick={() => { setEditingCat(null); setNewCatName(""); setNewCatColor("#3b82f6"); setNewCatIcon("📁"); setShowAddCategory(true); }}
           style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", background: "none", border: "none", cursor: "pointer", padding: 0 }}
@@ -273,11 +260,7 @@ export default function SettingsPage() {
           { label: ru ? "Активных" : "Active", value: activeTasks },
           { label: ru ? "Выполнено" : "Done", value: doneTasks },
         ].map(({ label, value }) => (
-          <div key={label} style={{
-            backgroundColor: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: "14px", padding: "14px 10px", textAlign: "center",
-          }}>
+          <div key={label} style={{ backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "14px", padding: "14px 10px", textAlign: "center" }}>
             <p style={{ fontSize: "24px", fontWeight: 700, color: "white", margin: "0 0 4px 0" }}>{value}</p>
             <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{label}</p>
           </div>
@@ -309,16 +292,10 @@ export default function SettingsPage() {
         <Shield size={13} style={{ marginRight: "5px" }} />
         {ru ? "Аккаунт" : "Account"}
       </SectionTitle>
-      <div style={{
-        backgroundColor: "rgba(255,255,255,0.05)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: "16px", padding: "14px 16px", marginBottom: "20px",
-      }}>
+      <div style={{ backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "16px", padding: "14px 16px", marginBottom: "20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)" }}>Telegram ID</span>
-          <span style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.7)" }}>
-            {userId || "—"}
-          </span>
+          <span style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.7)" }}>{userId || "—"}</span>
         </div>
       </div>
 
@@ -327,15 +304,9 @@ export default function SettingsPage() {
         <Bell size={13} style={{ marginRight: "5px" }} />
         {ru ? "Уведомления" : "Notifications"}
       </SectionTitle>
-      <div style={{
-        backgroundColor: "rgba(255,255,255,0.05)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: "16px", padding: "14px 16px", marginBottom: "20px",
-      }}>
+      <div style={{ backgroundColor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "16px", padding: "14px 16px", marginBottom: "20px" }}>
         <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.6)", margin: 0, lineHeight: 1.5 }}>
-          {ru
-            ? "Уведомления приходят через @aiplannerrubot в Telegram"
-            : "Notifications via @aiplannerrubot in Telegram"}
+          {ru ? "Уведомления приходят через @aiplannerrubot в Telegram" : "Notifications via @aiplannerrubot in Telegram"}
         </p>
       </div>
 
@@ -350,21 +321,11 @@ export default function SettingsPage() {
           tg?.showConfirm(
             ru ? "Удалить все задачи?" : "Delete all tasks?",
             (confirmed: boolean) => {
-              if (confirmed) {
-                localStorage.removeItem("cortex-tasks");
-                window.location.reload();
-              }
+              if (confirmed) { localStorage.removeItem("cortex-tasks"); window.location.reload(); }
             }
           );
         }}
-        style={{
-          width: "100%", height: "44px", borderRadius: "12px",
-          border: "1px solid rgba(239,68,68,0.3)",
-          backgroundColor: "rgba(239,68,68,0.08)",
-          fontSize: "14px", fontWeight: 500, color: "#f87171",
-          cursor: "pointer", display: "flex", alignItems: "center",
-          justifyContent: "center", gap: "8px",
-        }}
+        style={{ width: "100%", height: "44px", borderRadius: "12px", border: "1px solid rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)", fontSize: "14px", fontWeight: 500, color: "#f87171", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
       >
         <Trash2 size={16} />{ru ? "Удалить все задачи" : "Delete all tasks"}
       </button>
@@ -372,23 +333,12 @@ export default function SettingsPage() {
       {/* ===== МОДАЛКА РАЗДЕЛА ===== */}
       {showAddCategory && (
         <div
-          style={{
-            position: "fixed", inset: 0, zIndex: 200,
-            backgroundColor: "rgba(0,0,0,0.75)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            padding: "16px",
-          }}
+          style={{ position: "fixed", inset: 0, zIndex: 200, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
           onClick={(e) => { if (e.target === e.currentTarget) setShowAddCategory(false); }}
         >
           <div
             ref={modalRef}
-            style={{
-              backgroundColor: "#1e293b", borderRadius: "20px",
-              padding: "20px", width: "100%", maxWidth: "320px",
-              border: "1px solid rgba(255,255,255,0.08)",
-              maxHeight: "80vh", overflowY: "auto",
-              boxSizing: "border-box" as const,
-            }}
+            style={{ backgroundColor: "#1e293b", borderRadius: "20px", padding: "20px", width: "100%", maxWidth: "320px", border: "1px solid rgba(255,255,255,0.08)", maxHeight: "80vh", overflowY: "auto", boxSizing: "border-box" as const }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
@@ -401,21 +351,10 @@ export default function SettingsPage() {
             </div>
 
             <div style={{ marginBottom: "12px" }}>
-              <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0" }}>
-                {ru ? "Иконка" : "Icon"}
-              </p>
+              <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0" }}>{ru ? "Иконка" : "Icon"}</p>
               <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                 {["📁", "🎂", "🌴", "💳", "🏠", "💊", "🏋️", "📚", "🎯", "✈️", "🎵", "💼", "🚗", "🏥", "🎓", "💰"].map((icon) => (
-                  <button
-                    key={icon}
-                    onClick={() => setNewCatIcon(icon)}
-                    style={{
-                      width: "36px", height: "36px", fontSize: "18px",
-                      borderRadius: "8px", cursor: "pointer",
-                      backgroundColor: newCatIcon === icon ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.07)",
-                      border: newCatIcon === icon ? "1px solid #3b82f6" : "1px solid transparent",
-                    }}
-                  >
+                  <button key={icon} onClick={() => setNewCatIcon(icon)} style={{ width: "36px", height: "36px", fontSize: "18px", borderRadius: "8px", cursor: "pointer", backgroundColor: newCatIcon === icon ? "rgba(59,130,246,0.3)" : "rgba(255,255,255,0.07)", border: newCatIcon === icon ? "1px solid #3b82f6" : "1px solid transparent" }}>
                     {icon}
                   </button>
                 ))}
@@ -423,44 +362,22 @@ export default function SettingsPage() {
             </div>
 
             <div style={{ marginBottom: "12px" }}>
-              <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 6px 0" }}>
-                {ru ? "Название" : "Name"}
-              </p>
+              <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 6px 0" }}>{ru ? "Название" : "Name"}</p>
               <input
                 ref={nameInputRef}
                 value={newCatName}
                 onChange={(e) => setNewCatName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAddCategory()}
                 placeholder={ru ? "Название раздела" : "Section name"}
-                style={{
-                  display: "block", width: "100%",
-                  boxSizing: "border-box" as const,
-                  height: "42px", borderRadius: "10px",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  backgroundColor: "rgba(255,255,255,0.07)",
-                  paddingLeft: "12px", paddingRight: "12px",
-                  fontSize: "14px", color: "white",
-                  outline: "none", fontFamily: "inherit",
-                }}
+                style={{ display: "block", width: "100%", boxSizing: "border-box" as const, height: "42px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "12px", paddingRight: "12px", fontSize: "14px", color: "white", outline: "none", fontFamily: "inherit" }}
               />
             </div>
 
             <div style={{ marginBottom: "16px" }}>
-              <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0" }}>
-                {ru ? "Цвет" : "Color"}
-              </p>
+              <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0" }}>{ru ? "Цвет" : "Color"}</p>
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                 {["#3b82f6", "#ef4444", "#f59e0b", "#22c55e", "#a855f7", "#ec4899", "#06b6d4", "#f97316"].map((color) => (
-                  <button
-                    key={color}
-                    onClick={() => setNewCatColor(color)}
-                    style={{
-                      width: "30px", height: "30px", borderRadius: "50%",
-                      backgroundColor: color,
-                      border: newCatColor === color ? "3px solid white" : "2px solid transparent",
-                      cursor: "pointer",
-                    }}
-                  />
+                  <button key={color} onClick={() => setNewCatColor(color)} style={{ width: "30px", height: "30px", borderRadius: "50%", backgroundColor: color, border: newCatColor === color ? "3px solid white" : "2px solid transparent", cursor: "pointer" }} />
                 ))}
               </div>
             </div>
@@ -468,13 +385,7 @@ export default function SettingsPage() {
             <button
               onClick={handleAddCategory}
               disabled={!newCatName.trim()}
-              style={{
-                width: "100%", height: "44px", borderRadius: "12px",
-                border: "none",
-                backgroundColor: newCatName.trim() ? "#3b82f6" : "rgba(255,255,255,0.1)",
-                fontSize: "14px", fontWeight: 600, color: "white",
-                cursor: newCatName.trim() ? "pointer" : "default",
-              }}
+              style={{ width: "100%", height: "44px", borderRadius: "12px", border: "none", backgroundColor: newCatName.trim() ? "#3b82f6" : "rgba(255,255,255,0.1)", fontSize: "14px", fontWeight: 600, color: "white", cursor: newCatName.trim() ? "pointer" : "default" }}
             >
               {editingCat ? (ru ? "Сохранить" : "Save") : (ru ? "Создать раздел" : "Create section")}
             </button>
@@ -487,15 +398,7 @@ export default function SettingsPage() {
 
 function SectionTitle({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <div style={{
-      display: "flex", alignItems: "center",
-      fontSize: "11px", fontWeight: 600,
-      color: "rgba(255,255,255,0.35)",
-      textTransform: "uppercase" as const,
-      letterSpacing: "0.5px",
-      marginBottom: "8px",
-      ...style,
-    }}>
+    <div style={{ display: "flex", alignItems: "center", fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.35)", textTransform: "uppercase" as const, letterSpacing: "0.5px", marginBottom: "8px", ...style }}>
       {children}
     </div>
   );
