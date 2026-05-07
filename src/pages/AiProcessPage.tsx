@@ -9,7 +9,7 @@ import {
 import { useI18nStore } from "@/lib/i18n";
 import { Send, Bot, Mic, MicOff, Copy, Check } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { doc, setDoc, onSnapshot, collection, addDoc, Timestamp } from "firebase/firestore";
+import { addDoc, collection, Timestamp } from "firebase/firestore";
 
 const ASSISTANT_NAME_KEY = "cortex-assistant-name";
 const AI_FREE_LIMIT = 5;
@@ -57,64 +57,11 @@ function parseTaskFromResponse(response: string): {
   return { text: response, task: null };
 }
 
-// Сохраняем задачу гарантированно — в store + Firebase users + Firebase tasks
-async function saveTaskFromAI(
-  title: string,
-  dueDate: string | undefined,
-  priority: string,
-  repeat: string,
-  addTask: any,
-  userId: string
-) {
-  const taskId = `ai_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-  const now = new Date().toISOString();
-
-  // 1. Сохраняем в локальный store (мгновенно на главном экране)
-  await addTask({
-    title,
-    dueDate: dueDate || undefined,
-    priority: priority as any,
-    status: "todo",
-    isAiCreated: true,
-    repeat: (repeat || "none") as any,
-    type: "task",
-    description: "",
-    items: [],
-  });
-
-  // 2. Дополнительно сохраняем в Firebase /tasks для уведомлений бота
-  if (userId !== "unknown" && dueDate) {
-    try {
-      const dueDateObj = new Date(dueDate);
-      if (!isNaN(dueDateObj.getTime())) {
-        await addDoc(collection(db, "tasks"), {
-          userId,
-          taskId,
-          title,
-          description: "",
-          dueDate,
-          priority: priority || "medium",
-          status: "todo",
-          createdAt: now,
-          isSent: false,
-          reminderAt: Timestamp.fromDate(dueDateObj),
-          repeat: repeat || "none",
-          type: "task",
-        });
-      }
-    } catch (e) {
-      console.error("Ошибка сохранения задачи для бота:", e);
-    }
-  }
-
-  return { id: taskId, title, dueDate };
-}
-
 const DEFAULT_MESSAGE = (ru: boolean, name: string): Message => ({
   role: "assistant",
   content: ru
-    ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\nМогу помочь:\n• Создать задачу: "напомни завтра в 10 встреча"\n• Показать план: "что у меня сегодня?"\n• Дать совет по продуктивности\n• 🎤 Голосовой ввод\n\n⚠️ Задачи с датой автоматически попадают в список и календарь`
-    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nI can help:\n• Create tasks: "remind tomorrow at 10 meeting"\n• Show plan: "what do I have today?"\n• Give productivity advice\n• 🎤 Voice input\n\n⚠️ Tasks with dates appear in your list and calendar`,
+    ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\nМогу помочь:\n• "напомни завтра в 10 встреча" → задача появится в списке\n• "что у меня сегодня?" → покажу план\n• "купить молоко" → задача без даты в разделе "Без срока"\n• 🎤 Голосовой ввод\n\nЛюбая задача сразу появляется на главном экране!`
+    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nI can help:\n• "remind tomorrow at 10 meeting" → task appears in list\n• "what do I have today?" → show plan\n• "buy milk" → task without date in "No deadline"\n• 🎤 Voice input\n\nAny task appears instantly on the main screen!`,
 });
 
 export default function AiProcessPage() {
@@ -195,13 +142,12 @@ export default function AiProcessPage() {
     if (!newName.trim()) return;
     localStorage.setItem(ASSISTANT_NAME_KEY, newName.trim());
     setAssistantName(newName.trim());
-    setNewName("");
-    setShowNameEdit(false);
+    setNewName(""); setShowNameEdit(false);
   };
 
   const quickQuestions = ru
-    ? ["что у меня сегодня?", "напомни завтра утром", "я в стрессе", "оптимизируй задачи"]
-    : ["what do I have today?", "remind tomorrow morning", "I'm stressed", "optimize tasks"];
+    ? ["что у меня сегодня?", "напомни завтра утром", "я в стрессе", "купить продукты"]
+    : ["what do I have today?", "remind tomorrow morning", "I'm stressed", "buy groceries"];
 
   const sendMessage = async (text?: string) => {
     if (sendingRef.current) return;
@@ -210,8 +156,8 @@ export default function AiProcessPage() {
 
     if (hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT) {
       const tg = (window as any).Telegram?.WebApp;
-      tg?.showAlert(ru ? `Лимит ${AI_FREE_LIMIT} запросов в день 🤖\n\nОформи подписку.\n\nНапиши боту /subscribe` : `Daily limit reached.\n\nSend /subscribe`);
-      tg?.openTelegramLink("https://t.me/aiplannerrubot");
+      tg?.showAlert(ru ? `Лимит ${AI_FREE_LIMIT} запросов 🤖\n\nОформи подписку.\n\nНапиши боту /subscribe` : `Daily limit reached.\n\nSend /subscribe`);
+      tg?.openTelegramLink("https://t.me/aiplannerrubot?start=subscribe");
       return;
     }
 
@@ -239,20 +185,23 @@ export default function AiProcessPage() {
       const systemPrompt = `Ты AI ассистент планировщика CortexAI. Время: ${now.toLocaleString("ru-RU")}.
 
 Активные задачи: ${activeTasks.length > 0
-        ? activeTasks.map(t => `${t.title}${t.dueDate ? ` (${new Date(t.dueDate).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })})` : ""}`).join(", ")
+        ? activeTasks.map(t => `${t.title}${t.dueDate ? ` (${new Date(t.dueDate).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })})` : " (без даты)"}`).join(", ")
         : "нет задач"}
 
-ВАЖНО: Если пользователь хочет создать задачу, напоминание, встречу — ОБЯЗАТЕЛЬНО добавь в конец ответа:
+ВАЖНО: Если пользователь хочет создать задачу, напоминание, добавить дело — ВСЕГДА добавь в конец:
 TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","priority":"medium","repeat":"none"}
 
 Правила:
-- Отвечай коротко (2-3 предложения)
+- Отвечай коротко (1-2 предложения)
 - ${ru ? "Только на русском" : "Only in English"}
 - Используй эмодзи
 - priority: low/medium/high, repeat: none/daily
-- Если пользователь не указал время — спроси когда напомнить
-- Если указал "завтра" без времени — поставь 09:00
-- Если указал "через час" — рассчитай точное время`;
+- ЕСЛИ нет времени/даты — dueDate должен быть null (задача попадёт в раздел "Без срока")
+- ЕСЛИ указано "завтра" без времени — ставь завтра 09:00
+- ЕСЛИ "через час" — рассчитай точное время от ${now.toLocaleString("ru-RU")}
+- ЕСЛИ "сегодня вечером" — ставь сегодня 19:00
+- НИКОГДА не создавай задачу с dueDate в прошлом
+- Задача ОБЯЗАТЕЛЬНО создаётся даже без даты`;
 
       const history = messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
       history.push({ role: "user", content: messageText });
@@ -274,33 +223,73 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
       const aiResponse = data.content;
       const { text, task } = parseTaskFromResponse(aiResponse);
 
-      // Если AI создал задачу — ГАРАНТИРОВАННО сохраняем
       if (task && task.title && task.title.length > 1) {
         try {
-          const saved = await saveTaskFromAI(
-            task.title,
-            task.dueDate || undefined,
-            task.priority || "medium",
-            task.repeat || "none",
-            addTask,
-            userId
-          );
+          // Валидируем dueDate
+          let validDueDate: string | undefined = undefined;
+          if (task.dueDate) {
+            const d = new Date(task.dueDate);
+            // Принимаем только будущие даты
+            if (!isNaN(d.getTime()) && d > new Date()) {
+              validDueDate = task.dueDate;
+            }
+          }
+
+          // Гарантированно сохраняем через store
+          const savedTask = await addTask({
+            title: task.title,
+            dueDate: validDueDate,
+            priority: (task.priority || "medium") as any,
+            status: "todo",
+            isAiCreated: true,
+            repeat: (task.repeat || "none") as any,
+            type: "task",
+            description: "",
+            items: [],
+          });
+
+          // Дополнительно сохраняем в /tasks для уведомлений бота
+          if (validDueDate && userId !== "unknown") {
+            const dueDate = new Date(validDueDate);
+            addDoc(collection(db, "tasks"), {
+              userId,
+              taskId: savedTask.id,
+              title: task.title,
+              description: "",
+              dueDate: validDueDate,
+              priority: task.priority || "medium",
+              status: "todo",
+              createdAt: new Date().toISOString(),
+              isSent: false,
+              // Точное время — бот отправит ровно в этот момент
+              reminderAt: Timestamp.fromDate(dueDate),
+              repeat: task.repeat || "none",
+              type: "task",
+            }).catch(console.error);
+          }
+
+          const timeStr = validDueDate
+            ? new Date(validDueDate).toLocaleString(ru ? "ru-RU" : "en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+            : (ru ? "без срока" : "no deadline");
 
           const confirmMsg = ru
-            ? `✅ Задача создана и добавлена в список!\n\n📌 ${task.title}${task.dueDate ? `\n⏰ ${new Date(task.dueDate).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}\n\n${text}`
-            : `✅ Task created and added to list!\n\n📌 ${task.title}${task.dueDate ? `\n⏰ ${new Date(task.dueDate).toLocaleString("en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}\n\n${text}`;
+            ? `✅ Задача добавлена в список!\n\n📌 ${task.title}\n⏰ ${timeStr}\n\n${text}`
+            : `✅ Task added to list!\n\n📌 ${task.title}\n⏰ ${timeStr}\n\n${text}`;
 
           setMessages((prev) => [...prev, { role: "assistant", content: confirmMsg }]);
         } catch (taskErr) {
           console.error("Ошибка сохранения задачи:", taskErr);
-          setMessages((prev) => [...prev, { role: "assistant", content: text + (ru ? "\n\n⚠️ Задача не сохранилась. Попробуй ещё раз." : "\n\n⚠️ Task not saved. Try again.") }]);
+          setMessages((prev) => [...prev, {
+            role: "assistant",
+            content: text + (ru ? "\n\n⚠️ Задача не сохранилась. Попробуй ещё раз." : "\n\n⚠️ Task not saved. Try again."),
+          }]);
         }
       } else {
         setMessages((prev) => [...prev, { role: "assistant", content: text }]);
       }
     } catch (err: any) {
       console.error("AI error:", err);
-      setMessages((prev) => [...prev, { role: "assistant", content: ru ? "⚠️ Ошибка подключения. Попробуй ещё раз." : "⚠️ Connection error. Try again." }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: ru ? "⚠️ Ошибка. Попробуй ещё раз." : "⚠️ Error. Try again." }]);
     } finally {
       setLoading(false);
       sendingRef.current = false;
@@ -333,7 +322,7 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
           <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 6px 0" }}>{ru ? "Имя ассистента" : "Name"}</p>
           <div style={{ display: "flex", gap: "8px" }}>
             <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && saveName()} placeholder={ru ? "Имя..." : "Name..."} style={{ flex: 1, height: "34px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "10px", paddingRight: "10px", fontSize: "14px", color: "white", outline: "none", fontFamily: "inherit" }} />
-            <button onClick={saveName} style={{ height: "34px", paddingLeft: "12px", paddingRight: "12px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>{ru ? "ОК" : "OK"}</button>
+            <button onClick={saveName} style={{ height: "34px", paddingLeft: "12px", paddingRight: "12px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>OK</button>
             <button onClick={() => setShowNameEdit(false)} style={{ height: "34px", paddingLeft: "10px", paddingRight: "10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "transparent", color: "rgba(255,255,255,0.5)", fontSize: "12px", cursor: "pointer" }}>✕</button>
           </div>
         </div>
@@ -341,7 +330,7 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
 
       {isLimited && (
         <div style={{ backgroundColor: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px", flexShrink: 0, textAlign: "center" }}>
-          <p style={{ fontSize: "12px", color: "#fca5a5", margin: "0 0 6px 0" }}>{ru ? `Лимит ${AI_FREE_LIMIT} запросов 🤖` : `Limit ${AI_FREE_LIMIT} requests 🤖`}</p>
+          <p style={{ fontSize: "12px", color: "#fca5a5", margin: "0 0 6px 0" }}>{ru ? `Лимит ${AI_FREE_LIMIT} запросов 🤖` : `Limit ${AI_FREE_LIMIT} 🤖`}</p>
           <button onClick={() => { const tg = (window as any).Telegram?.WebApp; tg?.openTelegramLink("https://t.me/aiplannerrubot?start=subscribe"); }} style={{ height: "30px", paddingLeft: "14px", paddingRight: "14px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
             {ru ? "Оформить подписку" : "Get subscription"}
           </button>
