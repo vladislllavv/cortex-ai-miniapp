@@ -78,20 +78,26 @@ type TaskStore = {
   selectedDate: string | null;
   isDataLoaded: boolean;
   isSynced: boolean;
-  addTask: (task: Omit<Task, "id" | "createdAt" | "notified">) => Promise<void>;
+
+  addTask: (task: Omit<Task, "id" | "createdAt" | "notified">) => Promise<Task>;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
   toggleTaskStatus: (taskId: string) => void;
   setSelectedDate: (date: string | null) => void;
+
   addBirthday: (birthday: Omit<Birthday, "id">) => Promise<void>;
   deleteBirthday: (id: string) => Promise<void>;
+
   addVacation: (vacation: Omit<Vacation, "id">) => Promise<void>;
   deleteVacation: (id: string) => Promise<void>;
+
   addCategory: (category: Omit<CustomCategory, "id">) => void;
   updateCategory: (id: string, updates: Partial<CustomCategory>) => void;
   deleteCategory: (id: string) => void;
+
   addCategoryEvent: (event: Omit<CategoryEvent, "id">) => Promise<void>;
   deleteCategoryEvent: (id: string) => Promise<void>;
+
   loadUserData: (userId: string) => Promise<void>;
   startSync: (userId: string) => () => void;
 };
@@ -153,7 +159,7 @@ function normalizeTask(task: any): Task {
     id: task.id || crypto.randomUUID(),
     title: task.title || "",
     description: task.description || "",
-    dueDate: task.dueDate,
+    dueDate: task.dueDate || undefined,
     priority: task.priority || "medium",
     status: task.status || "todo",
     isAiCreated: Boolean(task.isAiCreated),
@@ -174,12 +180,7 @@ function resetDailyTasks(tasks: Task[]): Task[] {
     if (task.repeat !== "daily" || task.status !== "done") return task;
     const completedDay = task.completedAt?.split("T")[0];
     if (completedDay && completedDay < todayStr) {
-      return {
-        ...task,
-        status: "todo" as TaskStatus,
-        completedAt: undefined,
-        updatedAt: new Date().toISOString(),
-      };
+      return { ...task, status: "todo" as TaskStatus, completedAt: undefined, updatedAt: new Date().toISOString() };
     }
     return task;
   });
@@ -229,6 +230,7 @@ function saveCategoryEventsLocal(events: CategoryEvent[]) {
   try { localStorage.setItem(CATEGORY_EVENTS_KEY, JSON.stringify(events)); } catch {}
 }
 
+// Сохраняем задачу в Firebase users/{userId}/tasks
 async function saveTaskToFirebase(task: Task, userId: string) {
   if (userId === "unknown") return;
   try {
@@ -249,26 +251,29 @@ async function saveTaskToFirebase(task: Task, userId: string) {
   }
 }
 
+// Сохраняем задачу в /tasks для уведомлений бота
+// ВАЖНО: reminderAt ставим ровно по dueDate — без смещений
 async function saveTaskForBot(task: Task, userId: string) {
   if (userId === "unknown" || !task.dueDate) return;
   try {
-    const date = new Date(task.dueDate);
-    if (!isNaN(date.getTime())) {
-      await addDoc(collection(db, "tasks"), {
-        userId,
-        taskId: task.id,
-        title: task.title,
-        description: task.description || "",
-        dueDate: task.dueDate,
-        priority: task.priority,
-        status: task.status,
-        createdAt: task.createdAt,
-        isSent: false,
-        reminderAt: Timestamp.fromDate(date),
-        repeat: task.repeat || "none",
-        type: task.type || "task",
-      });
-    }
+    const dueDate = new Date(task.dueDate);
+    if (isNaN(dueDate.getTime())) return;
+
+    await addDoc(collection(db, "tasks"), {
+      userId,
+      taskId: task.id,
+      title: task.title,
+      description: task.description || "",
+      dueDate: task.dueDate,
+      priority: task.priority,
+      status: task.status,
+      createdAt: task.createdAt,
+      isSent: false,
+      // Точное время из dueDate — бот отправит ровно в этот момент
+      reminderAt: Timestamp.fromDate(dueDate),
+      repeat: task.repeat || "none",
+      type: task.type || "task",
+    });
   } catch (e: any) {
     console.error("Bot task save error:", e.message);
   }
@@ -276,11 +281,7 @@ async function saveTaskForBot(task: Task, userId: string) {
 
 async function deleteTaskFromFirebase(taskId: string, userId: string) {
   if (userId === "unknown") return;
-  try {
-    await deleteDoc(doc(db, "users", userId, "tasks", taskId));
-  } catch (e: any) {
-    console.error("Firebase delete error:", e.message);
-  }
+  try { await deleteDoc(doc(db, "users", userId, "tasks", taskId)); } catch {}
 }
 
 export const useTaskStore = create<TaskStore>((set) => ({
@@ -293,6 +294,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
   isDataLoaded: false,
   isSynced: false,
 
+  // addTask возвращает созданную задачу для гарантированного использования
   addTask: async (task) => {
     const newTask: Task = {
       ...task,
@@ -304,17 +306,24 @@ export const useTaskStore = create<TaskStore>((set) => ({
       category: task.category || "",
       type: task.type || "task",
       items: task.items || [],
+      // dueDate сохраняем как есть — без изменений
+      dueDate: task.dueDate || undefined,
     };
 
+    // Мгновенно добавляем в UI и localStorage
     set((state) => {
       const updated = [newTask, ...state.tasks];
       saveTasks(updated);
       return { tasks: updated };
     });
 
+    // Асинхронно сохраняем в Firebase
     const userId = getTelegramUserId();
     saveTaskToFirebase(newTask, userId).catch(console.error);
     saveTaskForBot(newTask, userId).catch(console.error);
+
+    // Возвращаем задачу для использования в AI
+    return newTask;
   },
 
   updateTask: (taskId, updates) => {
@@ -348,12 +357,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
       const updated = state.tasks.map((t) => {
         if (t.id !== taskId) return t;
         const newStatus = t.status === "done" ? "todo" : "done";
-        return {
-          ...t,
-          status: newStatus as TaskStatus,
-          completedAt: newStatus === "done" ? now : undefined,
-          updatedAt: now,
-        };
+        return { ...t, status: newStatus as TaskStatus, completedAt: newStatus === "done" ? now : undefined, updatedAt: now };
       });
       saveTasks(updated);
       const userId = getTelegramUserId();
@@ -370,17 +374,13 @@ export const useTaskStore = create<TaskStore>((set) => ({
     const newBirthday: Birthday = { ...birthday, id };
     set((state) => ({ birthdays: [...state.birthdays, newBirthday] }));
     const userId = getTelegramUserId();
-    if (userId !== "unknown") {
-      setDoc(doc(db, "users", userId, "birthdays", id), newBirthday).catch(console.error);
-    }
+    if (userId !== "unknown") setDoc(doc(db, "users", userId, "birthdays", id), newBirthday).catch(console.error);
   },
 
   deleteBirthday: async (id) => {
     set((state) => ({ birthdays: state.birthdays.filter((b) => b.id !== id) }));
     const userId = getTelegramUserId();
-    if (userId !== "unknown") {
-      deleteDoc(doc(db, "users", userId, "birthdays", id)).catch(console.error);
-    }
+    if (userId !== "unknown") deleteDoc(doc(db, "users", userId, "birthdays", id)).catch(console.error);
   },
 
   addVacation: async (vacation) => {
@@ -388,17 +388,13 @@ export const useTaskStore = create<TaskStore>((set) => ({
     const newVacation: Vacation = { ...vacation, id };
     set((state) => ({ vacations: [...state.vacations, newVacation] }));
     const userId = getTelegramUserId();
-    if (userId !== "unknown") {
-      setDoc(doc(db, "users", userId, "vacations", id), newVacation).catch(console.error);
-    }
+    if (userId !== "unknown") setDoc(doc(db, "users", userId, "vacations", id), newVacation).catch(console.error);
   },
 
   deleteVacation: async (id) => {
     set((state) => ({ vacations: state.vacations.filter((v) => v.id !== id) }));
     const userId = getTelegramUserId();
-    if (userId !== "unknown") {
-      deleteDoc(doc(db, "users", userId, "vacations", id)).catch(console.error);
-    }
+    if (userId !== "unknown") deleteDoc(doc(db, "users", userId, "vacations", id)).catch(console.error);
   },
 
   addCategory: (category) => {
@@ -412,9 +408,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
 
   updateCategory: (id, updates) =>
     set((state) => {
-      const updated = state.categories.map((c) =>
-        c.id === id ? { ...c, ...updates } : c
-      );
+      const updated = state.categories.map((c) => c.id === id ? { ...c, ...updates } : c);
       saveCategories(updated);
       return { categories: updated };
     }),
@@ -437,9 +431,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
       return { categoryEvents: updated };
     });
     const userId = getTelegramUserId();
-    if (userId !== "unknown") {
-      setDoc(doc(db, "users", userId, "categoryEvents", id), newEvent).catch(console.error);
-    }
+    if (userId !== "unknown") setDoc(doc(db, "users", userId, "categoryEvents", id), newEvent).catch(console.error);
   },
 
   deleteCategoryEvent: async (id) => {
@@ -449,16 +441,11 @@ export const useTaskStore = create<TaskStore>((set) => ({
       return { categoryEvents: updated };
     });
     const userId = getTelegramUserId();
-    if (userId !== "unknown") {
-      deleteDoc(doc(db, "users", userId, "categoryEvents", id)).catch(console.error);
-    }
+    if (userId !== "unknown") deleteDoc(doc(db, "users", userId, "categoryEvents", id)).catch(console.error);
   },
 
   loadUserData: async (userId) => {
-    if (userId === "unknown") {
-      set({ isDataLoaded: true });
-      return;
-    }
+    if (userId === "unknown") { set({ isDataLoaded: true }); return; }
     try {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
@@ -487,30 +474,21 @@ export const useTaskStore = create<TaskStore>((set) => ({
       tasksSnap.forEach((d) => {
         const data = d.data();
 
+        // Удаляем выполненные обычные задачи старше 1 дня
         if (data.status === "done" && data.completedAt && data.repeat !== "daily") {
-          const completedAt = new Date(data.completedAt);
-          if (completedAt < yesterday) {
+          if (new Date(data.completedAt) < yesterday) {
             batch.delete(d.ref);
             hasChanges = true;
             return;
           }
         }
 
+        // Daily задачи — сбрасываем вместо удаления
         if (data.repeat === "daily" && data.status === "done" && data.completedAt) {
           const completedDay = data.completedAt.split("T")[0];
           if (completedDay < todayStr) {
-            const resetTask = normalizeTask({
-              ...data, id: d.id,
-              status: "todo",
-              completedAt: undefined,
-              updatedAt: new Date().toISOString(),
-            });
-            batch.update(d.ref, {
-              status: "todo",
-              completedAt: null,
-              updatedAt: new Date().toISOString(),
-              isSent: false,
-            });
+            const resetTask = normalizeTask({ ...data, id: d.id, status: "todo", completedAt: undefined, updatedAt: new Date().toISOString() });
+            batch.update(d.ref, { status: "todo", completedAt: null, updatedAt: new Date().toISOString(), isSent: false });
             hasChanges = true;
             cloudMap.set(d.id, resetTask);
             return;
@@ -522,6 +500,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
 
       if (hasChanges) await batch.commit();
 
+      // Мержим с локальными
       const localTasks = loadTasks();
       const localMap = new Map(localTasks.map((t) => [t.id, t]));
       const mergedTasks: Task[] = [];
@@ -537,11 +516,11 @@ export const useTaskStore = create<TaskStore>((set) => ({
         }
       });
 
+      // Локальные задачи которых нет в облаке — синхронизируем
       localMap.forEach((localTask) => {
         if (!cloudMap.has(localTask.id)) {
           if (localTask.status === "done" && localTask.completedAt && localTask.repeat !== "daily") {
-            const completedAt = new Date(localTask.completedAt);
-            if (completedAt < yesterday) return;
+            if (new Date(localTask.completedAt) < yesterday) return;
           }
           mergedTasks.push(localTask);
           saveTaskToFirebase(localTask, userId).catch(console.error);
@@ -553,25 +532,17 @@ export const useTaskStore = create<TaskStore>((set) => ({
 
       const localEvents = loadCategoryEvents();
       const mergedEvents = [...categoryEvents];
-      localEvents.forEach((le) => {
-        if (!mergedEvents.find((e) => e.id === le.id)) mergedEvents.push(le);
-      });
+      localEvents.forEach((le) => { if (!mergedEvents.find((e) => e.id === le.id)) mergedEvents.push(le); });
       saveCategoryEventsLocal(mergedEvents);
 
-      set({
-        birthdays,
-        vacations,
-        categoryEvents: mergedEvents,
-        tasks: mergedTasks,
-        isDataLoaded: true,
-      });
+      set({ birthdays, vacations, categoryEvents: mergedEvents, tasks: mergedTasks, isDataLoaded: true });
     } catch (e) {
       console.error("Load user data error:", e);
       set({ isDataLoaded: true });
     }
   },
 
-  // Ускоренная синхронизация
+  // Мгновенная синхронизация между устройствами
   startSync: (userId) => {
     if (userId === "unknown") return () => {};
 
@@ -579,14 +550,15 @@ export const useTaskStore = create<TaskStore>((set) => ({
       collection(db, "users", userId, "tasks"),
       { includeMetadataChanges: false },
       (snapshot) => {
-        // Пропускаем кэшированные данные без изменений
-        if (snapshot.metadata.fromCache && !snapshot.metadata.hasPendingWrites) return;
+        // Обрабатываем только реальные изменения с сервера
+        if (snapshot.metadata.fromCache) return;
 
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         const todayStr = new Date().toISOString().split("T")[0];
 
         const cloudMap = new Map<string, Task>();
+
         snapshot.forEach((d) => {
           const data = d.data();
 
@@ -597,11 +569,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
           if (data.repeat === "daily" && data.status === "done" && data.completedAt) {
             const completedDay = data.completedAt.split("T")[0];
             if (completedDay < todayStr) {
-              cloudMap.set(d.id, normalizeTask({
-                ...data, id: d.id,
-                status: "todo",
-                completedAt: undefined,
-              }));
+              cloudMap.set(d.id, normalizeTask({ ...data, id: d.id, status: "todo", completedAt: undefined }));
               return;
             }
           }
@@ -613,6 +581,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
           const merged: Task[] = [];
           const localMap = new Map(state.tasks.map((t) => [t.id, t]));
 
+          // Облачные задачи имеют приоритет (они пришли с сервера)
           cloudMap.forEach((cloudTask) => {
             const localTask = localMap.get(cloudTask.id);
             if (localTask) {
@@ -624,9 +593,11 @@ export const useTaskStore = create<TaskStore>((set) => ({
             }
           });
 
+          // Локальные задачи которых нет в облаке — pending upload
           localMap.forEach((localTask) => {
             if (!cloudMap.has(localTask.id)) {
               merged.push(localTask);
+              // Синхронизируем в Firebase
               saveTaskToFirebase(localTask, userId).catch(console.error);
             }
           });
@@ -644,13 +615,18 @@ export const useTaskStore = create<TaskStore>((set) => ({
 
 export function usePersistTasks() {
   useEffect(() => {
+    // Сбрасываем daily задачи при старте
     const stored = loadTasks();
     const reset = resetDailyTasks(stored);
     saveTasks(reset);
     useTaskStore.setState({ tasks: reset });
 
     const userId = getTelegramUserId();
+
+    // Загружаем данные из Firebase
     useTaskStore.getState().loadUserData(userId);
+
+    // Запускаем realtime синхронизацию
     const unsubscribe = useTaskStore.getState().startSync(userId);
 
     return () => unsubscribe();
@@ -696,8 +672,7 @@ export const RUSSIAN_HOLIDAYS: Record<string, string> = {
 
 export function isWeekend(dateStr: string): boolean {
   const date = new Date(dateStr + "T12:00:00");
-  const day = date.getDay();
-  return day === 0 || day === 6;
+  return date.getDay() === 0 || date.getDay() === 6;
 }
 
 export function isHoliday(dateStr: string): boolean {
