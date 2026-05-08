@@ -7,9 +7,9 @@ import {
   loadChatHistory,
 } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
-import { Send, Bot, Mic, MicOff, Copy, Check } from "lucide-react";
+import { Send, Bot, Mic, MicOff, Copy, Check, Settings, X } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { addDoc, collection, Timestamp } from "firebase/firestore";
+import { addDoc, collection, Timestamp, doc, setDoc, getDoc } from "firebase/firestore";
 
 const ASSISTANT_NAME_KEY = "cortex-assistant-name";
 const AI_FREE_LIMIT = 5;
@@ -37,6 +37,41 @@ function setAiUsageStorage(count: number) {
   localStorage.setItem(AI_USAGE_KEY, JSON.stringify({ date: today, count }));
 }
 
+// Типы режимов мотивации
+type MotivationMode = "off" | "soft" | "normal" | "hard";
+
+interface MotivationSettings {
+  mode: MotivationMode;
+  timesPerDay: number;
+  enabled: boolean;
+}
+
+const MOTIVATION_MODES: Record<MotivationMode, { label: string; labelEn: string; description: string; descriptionEn: string; emoji: string }> = {
+  off: { label: "Выключено", labelEn: "Off", description: "Уведомления не приходят", descriptionEn: "No notifications", emoji: "🔕" },
+  soft: { label: "Мягкий", labelEn: "Soft", description: "Добрые и поддерживающие слова", descriptionEn: "Kind and supportive words", emoji: "🌸" },
+  normal: { label: "Обычный", labelEn: "Normal", description: "Сбалансированная мотивация", descriptionEn: "Balanced motivation", emoji: "⚡" },
+  hard: { label: "Жёсткий", labelEn: "Hard", description: "Прямо и требовательно, без нецензурщины", descriptionEn: "Direct and demanding, no profanity", emoji: "🔥" },
+};
+
+async function loadMotivationSettings(userId: string): Promise<MotivationSettings> {
+  const defaults: MotivationSettings = { mode: "normal", timesPerDay: 3, enabled: true };
+  if (userId === "unknown") return defaults;
+  try {
+    const snap = await getDoc(doc(db, "users", userId, "settings", "motivation"));
+    if (snap.exists()) return { ...defaults, ...snap.data() as MotivationSettings };
+  } catch {}
+  return defaults;
+}
+
+async function saveMotivationSettings(userId: string, settings: MotivationSettings) {
+  if (userId === "unknown") return;
+  try {
+    await setDoc(doc(db, "users", userId, "settings", "motivation"), settings);
+  } catch (e) {
+    console.error("Save motivation settings error:", e);
+  }
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -60,8 +95,8 @@ function parseTaskFromResponse(response: string): {
 const DEFAULT_MESSAGE = (ru: boolean, name: string): Message => ({
   role: "assistant",
   content: ru
-    ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\nМогу помочь:\n• "напомни завтра в 10 встреча" → задача появится в списке\n• "что у меня сегодня?" → покажу план\n• "купить молоко" → задача без даты в разделе "Без срока"\n• 🎤 Голосовой ввод\n\nЛюбая задача сразу появляется на главном экране!`
-    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nI can help:\n• "remind tomorrow at 10 meeting" → task appears in list\n• "what do I have today?" → show plan\n• "buy milk" → task without date in "No deadline"\n• 🎤 Voice input\n\nAny task appears instantly on the main screen!`,
+    ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\nМогу помочь:\n• "напомни завтра в 10 встреча" → задача в список\n• "купить молоко" → задача без даты\n• "что у меня сегодня?" → план дня\n• 🎤 Голосовой ввод\n\n⚙️ Нажми на шестерёнку для настройки мотивации`
+    : `Hi! 👋 I'm ${name}, your AI assistant.\n\nI can help:\n• "remind tomorrow at 10 meeting" → task in list\n• "buy milk" → task without date\n• "what today?" → day plan\n• 🎤 Voice input\n\n⚙️ Tap gear to set up motivation`,
 });
 
 export default function AiProcessPage() {
@@ -72,7 +107,13 @@ export default function AiProcessPage() {
 
   const [assistantName, setAssistantName] = useState(getAssistantName());
   const [showNameEdit, setShowNameEdit] = useState(false);
+  const [showMotivationSettings, setShowMotivationSettings] = useState(false);
   const [newName, setNewName] = useState("");
+
+  const [motivationSettings, setMotivationSettings] = useState<MotivationSettings>({
+    mode: "normal", timesPerDay: 3, enabled: true,
+  });
+  const [motivationLoading, setMotivationLoading] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = loadChatHistory();
@@ -91,9 +132,11 @@ export default function AiProcessPage() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const userId = getTelegramUserId();
+
   useEffect(() => {
-    const userId = getTelegramUserId();
     checkSubscription(userId).then(setHasSubscription);
+    loadMotivationSettings(userId).then(setMotivationSettings);
   }, []);
 
   useEffect(() => {
@@ -112,6 +155,29 @@ export default function AiProcessPage() {
     document.addEventListener("visibilitychange", h);
     return () => document.removeEventListener("visibilitychange", h);
   }, []);
+
+  const handleSaveMotivationSettings = async (newSettings: MotivationSettings) => {
+    setMotivationLoading(true);
+    setMotivationSettings(newSettings);
+    await saveMotivationSettings(userId, newSettings);
+    setMotivationLoading(false);
+    setShowMotivationSettings(false);
+
+    const modeInfo = MOTIVATION_MODES[newSettings.mode];
+    if (newSettings.mode === "off" || !newSettings.enabled) {
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: ru ? "🔕 Мотивационные уведомления отключены." : "🔕 Motivation notifications disabled.",
+      }]);
+    } else {
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: ru
+          ? `${modeInfo.emoji} Мотивация настроена!\n\nРежим: ${modeInfo.label}\nУведомлений в день: ${newSettings.timesPerDay}\n\nБот будет присылать мотивационные сообщения учитывая твои задачи 💪`
+          : `${modeInfo.emoji} Motivation configured!\n\nMode: ${modeInfo.labelEn}\nPer day: ${newSettings.timesPerDay}\n\nBot will send motivational messages based on your tasks 💪`,
+      }]);
+    }
+  };
 
   const startListening = () => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -156,12 +222,11 @@ export default function AiProcessPage() {
 
     if (hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT) {
       const tg = (window as any).Telegram?.WebApp;
-      tg?.showAlert(ru ? `Лимит ${AI_FREE_LIMIT} запросов 🤖\n\nОформи подписку.\n\nНапиши боту /subscribe` : `Daily limit reached.\n\nSend /subscribe`);
+      tg?.showAlert(ru ? `Лимит ${AI_FREE_LIMIT} запросов 🤖\n\nОформи подписку.` : `Daily limit reached.\n\nGet subscription.`);
       tg?.openTelegramLink("https://t.me/aiplannerrubot?start=subscribe");
       return;
     }
 
-    const userId = getTelegramUserId();
     if (userId === "unknown") {
       setMessages((prev) => [...prev, { role: "assistant", content: ru ? "⚠️ Открой приложение через бота." : "⚠️ Open via bot." }]);
       return;
@@ -188,35 +253,26 @@ export default function AiProcessPage() {
         ? activeTasks.map(t => `${t.title}${t.dueDate ? ` (${new Date(t.dueDate).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })})` : " (без даты)"}`).join(", ")
         : "нет задач"}
 
-ВАЖНО: Если пользователь хочет создать задачу, напоминание, добавить дело — ВСЕГДА добавь в конец:
+ВАЖНО: Если пользователь хочет создать задачу — ВСЕГДА добавь в конец:
 TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","priority":"medium","repeat":"none"}
 
 Правила:
 - Отвечай коротко (1-2 предложения)
 - ${ru ? "Только на русском" : "Only in English"}
 - Используй эмодзи
-- priority: low/medium/high, repeat: none/daily
-- ЕСЛИ нет времени/даты — dueDate должен быть null (задача попадёт в раздел "Без срока")
-- ЕСЛИ указано "завтра" без времени — ставь завтра 09:00
-- ЕСЛИ "через час" — рассчитай точное время от ${now.toLocaleString("ru-RU")}
-- ЕСЛИ "сегодня вечером" — ставь сегодня 19:00
-- НИКОГДА не создавай задачу с dueDate в прошлом
-- Задача ОБЯЗАТЕЛЬНО создаётся даже без даты`;
+- dueDate = null если нет времени (задача попадёт в "Без срока")
+- Не создавай задачи с датой в прошлом`;
 
       const history = messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
       history.push({ role: "user", content: messageText });
 
-      const startTime = Date.now();
       const response = await fetch(AI_WORKER_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: history, systemPrompt }),
       });
 
-      console.log(`⏱ AI: ${Date.now() - startTime}ms`);
-
       if (!response.ok) throw new Error(`Worker error: ${response.status}`);
-
       const data = await response.json();
       if (data.error) throw new Error(data.error);
 
@@ -225,17 +281,12 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
 
       if (task && task.title && task.title.length > 1) {
         try {
-          // Валидируем dueDate
           let validDueDate: string | undefined = undefined;
           if (task.dueDate) {
             const d = new Date(task.dueDate);
-            // Принимаем только будущие даты
-            if (!isNaN(d.getTime()) && d > new Date()) {
-              validDueDate = task.dueDate;
-            }
+            if (!isNaN(d.getTime()) && d > new Date()) validDueDate = task.dueDate;
           }
 
-          // Гарантированно сохраняем через store
           const savedTask = await addTask({
             title: task.title,
             dueDate: validDueDate,
@@ -248,23 +299,14 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
             items: [],
           });
 
-          // Дополнительно сохраняем в /tasks для уведомлений бота
           if (validDueDate && userId !== "unknown") {
             const dueDate = new Date(validDueDate);
             addDoc(collection(db, "tasks"), {
-              userId,
-              taskId: savedTask.id,
-              title: task.title,
-              description: "",
-              dueDate: validDueDate,
-              priority: task.priority || "medium",
-              status: "todo",
-              createdAt: new Date().toISOString(),
-              isSent: false,
-              // Точное время — бот отправит ровно в этот момент
+              userId, taskId: savedTask.id, title: task.title, description: "",
+              dueDate: validDueDate, priority: task.priority || "medium",
+              status: "todo", createdAt: new Date().toISOString(), isSent: false,
               reminderAt: Timestamp.fromDate(dueDate),
-              repeat: task.repeat || "none",
-              type: "task",
+              repeat: task.repeat || "none", type: "task",
             }).catch(console.error);
           }
 
@@ -272,23 +314,19 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
             ? new Date(validDueDate).toLocaleString(ru ? "ru-RU" : "en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
             : (ru ? "без срока" : "no deadline");
 
-          const confirmMsg = ru
-            ? `✅ Задача добавлена в список!\n\n📌 ${task.title}\n⏰ ${timeStr}\n\n${text}`
-            : `✅ Task added to list!\n\n📌 ${task.title}\n⏰ ${timeStr}\n\n${text}`;
-
-          setMessages((prev) => [...prev, { role: "assistant", content: confirmMsg }]);
-        } catch (taskErr) {
-          console.error("Ошибка сохранения задачи:", taskErr);
           setMessages((prev) => [...prev, {
             role: "assistant",
-            content: text + (ru ? "\n\n⚠️ Задача не сохранилась. Попробуй ещё раз." : "\n\n⚠️ Task not saved. Try again."),
+            content: ru
+              ? `✅ Задача добавлена!\n\n📌 ${task.title}\n⏰ ${timeStr}\n\n${text}`
+              : `✅ Task added!\n\n📌 ${task.title}\n⏰ ${timeStr}\n\n${text}`,
           }]);
+        } catch (taskErr) {
+          setMessages((prev) => [...prev, { role: "assistant", content: text + (ru ? "\n\n⚠️ Задача не сохранилась." : "\n\n⚠️ Task not saved.") }]);
         }
       } else {
         setMessages((prev) => [...prev, { role: "assistant", content: text }]);
       }
     } catch (err: any) {
-      console.error("AI error:", err);
       setMessages((prev) => [...prev, { role: "assistant", content: ru ? "⚠️ Ошибка. Попробуй ещё раз." : "⚠️ Error. Try again." }]);
     } finally {
       setLoading(false);
@@ -297,10 +335,12 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
   };
 
   const isLimited = hasSubscription === false && aiUsageCount >= AI_FREE_LIMIT;
+  const currentMode = MOTIVATION_MODES[motivationSettings.mode];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 120px)", maxHeight: "calc(100vh - 120px)", overflow: "hidden" }}>
 
+      {/* Заголовок */}
       <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px", flexShrink: 0 }}>
         <div style={{ width: "36px", height: "36px", borderRadius: "10px", backgroundColor: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Bot size={18} color="#3b82f6" />
@@ -311,12 +351,33 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
             <span style={{ fontSize: "10px", backgroundColor: "rgba(59,130,246,0.2)", color: "#60a5fa", padding: "1px 6px", borderRadius: "8px" }}>AI ⚡</span>
             <button onClick={() => { setNewName(assistantName); setShowNameEdit(true); }} style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", fontSize: "12px", color: "rgba(255,255,255,0.3)" }}>✏️</button>
           </div>
-          <p style={{ fontSize: "11px", color: isLimited ? "#fca5a5" : "rgba(255,255,255,0.4)", margin: 0 }}>
-            {hasSubscription === null ? (ru ? "Загрузка..." : "Loading...") : hasSubscription ? (ru ? "Подписка активна ✅" : "Sub active ✅") : isLimited ? (ru ? "Лимит исчерпан" : "Limit reached") : ru ? `${AI_FREE_LIMIT - aiUsageCount} из ${AI_FREE_LIMIT}` : `${AI_FREE_LIMIT - aiUsageCount} of ${AI_FREE_LIMIT}`}
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <p style={{ fontSize: "11px", color: isLimited ? "#fca5a5" : "rgba(255,255,255,0.4)", margin: 0 }}>
+              {hasSubscription === null ? "..." : hasSubscription ? (ru ? "Подписка ✅" : "Sub ✅") : isLimited ? (ru ? "Лимит" : "Limit") : `${AI_FREE_LIMIT - aiUsageCount}/${AI_FREE_LIMIT}`}
+            </p>
+            {/* Статус мотивации */}
+            <span style={{ fontSize: "11px", color: motivationSettings.mode === "off" || !motivationSettings.enabled ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.5)" }}>
+              • {currentMode.emoji} {ru ? currentMode.label : currentMode.labelEn}
+            </span>
+          </div>
         </div>
+
+        {/* Кнопка настроек мотивации */}
+        <button
+          onClick={() => setShowMotivationSettings(true)}
+          style={{
+            width: "34px", height: "34px", borderRadius: "10px",
+            backgroundColor: "rgba(255,255,255,0.07)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", flexShrink: 0,
+          }}
+        >
+          <Settings size={16} color="rgba(255,255,255,0.5)" />
+        </button>
       </div>
 
+      {/* Редактирование имени */}
       {showNameEdit && (
         <div style={{ backgroundColor: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "12px", padding: "10px 12px", marginBottom: "8px", flexShrink: 0 }}>
           <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: "0 0 6px 0" }}>{ru ? "Имя ассистента" : "Name"}</p>
@@ -328,6 +389,7 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
         </div>
       )}
 
+      {/* Лимит */}
       {isLimited && (
         <div style={{ backgroundColor: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px", flexShrink: 0, textAlign: "center" }}>
           <p style={{ fontSize: "12px", color: "#fca5a5", margin: "0 0 6px 0" }}>{ru ? `Лимит ${AI_FREE_LIMIT} запросов 🤖` : `Limit ${AI_FREE_LIMIT} 🤖`}</p>
@@ -337,6 +399,7 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
         </div>
       )}
 
+      {/* Быстрые вопросы */}
       {messages.length <= 1 && (
         <div style={{ display: "flex", gap: "6px", overflowX: "auto", marginBottom: "8px", paddingBottom: "2px", flexShrink: 0 }}>
           {quickQuestions.map((q) => (
@@ -347,6 +410,7 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
         </div>
       )}
 
+      {/* Сообщения */}
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" as any, display: "flex", flexDirection: "column", gap: "12px", paddingBottom: "4px", minHeight: 0 }}>
         {messages.map((msg, i) => (
           <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
@@ -375,6 +439,7 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Поле ввода */}
       <div style={{ display: "flex", gap: "6px", alignItems: "flex-end", paddingTop: "16px", borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
         <button onClick={isListening ? stopListening : startListening} disabled={isLimited} style={{ width: "40px", height: "40px", minWidth: "40px", borderRadius: "50%", backgroundColor: isListening ? "#ef4444" : "rgba(255,255,255,0.08)", border: isListening ? "2px solid #fca5a5" : "none", cursor: isLimited ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: isLimited ? 0.3 : 1 }}>
           {isListening ? <MicOff size={16} color="white" /> : <Mic size={16} color="rgba(255,255,255,0.6)" />}
@@ -386,6 +451,130 @@ TASK_JSON:{"title":"название","dueDate":"ISO_дата_или_null","prio
           <Send size={15} color="white" />
         </button>
       </div>
+
+      {/* Модалка настроек мотивации */}
+      {showMotivationSettings && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowMotivationSettings(false); }}>
+          <div style={{ backgroundColor: "#1e293b", borderRadius: "20px", padding: "20px", width: "100%", maxWidth: "340px", border: "1px solid rgba(255,255,255,0.08)", maxHeight: "85vh", overflowY: "auto" }}
+            onClick={(e) => e.stopPropagation()}>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <p style={{ fontSize: "16px", fontWeight: 700, color: "white", margin: 0 }}>
+                💪 {ru ? "Настройки мотивации" : "Motivation Settings"}
+              </p>
+              <button onClick={() => setShowMotivationSettings(false)} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                <X size={18} color="rgba(255,255,255,0.4)" />
+              </button>
+            </div>
+
+            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: "0 0 16px 0" }}>
+              {ru
+                ? "Бот будет присылать мотивационные уведомления с учётом твоих задач несколько раз в день."
+                : "Bot will send motivational notifications based on your tasks several times a day."}
+            </p>
+
+            {/* Включить/выключить */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", backgroundColor: "rgba(255,255,255,0.05)", borderRadius: "12px", padding: "12px 14px", marginBottom: "14px", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <div>
+                <p style={{ fontSize: "14px", fontWeight: 600, color: "white", margin: 0 }}>
+                  {ru ? "Мотивационные уведомления" : "Motivation notifications"}
+                </p>
+                <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                  {motivationSettings.enabled ? (ru ? "Включены" : "Enabled") : (ru ? "Выключены" : "Disabled")}
+                </p>
+              </div>
+              <div onClick={() => setMotivationSettings(prev => ({ ...prev, enabled: !prev.enabled }))}
+                style={{ position: "relative", width: "44px", minWidth: "44px", height: "24px", borderRadius: "12px", backgroundColor: motivationSettings.enabled ? "#3b82f6" : "rgba(255,255,255,0.15)", cursor: "pointer", transition: "background-color 0.2s ease", flexShrink: 0 }}>
+                <div style={{ position: "absolute", top: "2px", left: motivationSettings.enabled ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", backgroundColor: "white", boxShadow: "0 1px 3px rgba(0,0,0,0.3)", transition: "left 0.2s ease" }} />
+              </div>
+            </div>
+
+            {motivationSettings.enabled && (
+              <>
+                {/* Режим */}
+                <p style={{ fontSize: "12px", fontWeight: 600, color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  {ru ? "Режим" : "Mode"}
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
+                  {(Object.entries(MOTIVATION_MODES) as [MotivationMode, typeof MOTIVATION_MODES[MotivationMode]][]).map(([key, info]) => (
+                    <button
+                      key={key}
+                      onClick={() => setMotivationSettings(prev => ({ ...prev, mode: key }))}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "12px",
+                        padding: "12px 14px", borderRadius: "12px",
+                        border: motivationSettings.mode === key ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.08)",
+                        backgroundColor: motivationSettings.mode === key ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.04)",
+                        cursor: "pointer", textAlign: "left", width: "100%",
+                      }}
+                    >
+                      <span style={{ fontSize: "22px" }}>{info.emoji}</span>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: "14px", fontWeight: 600, color: motivationSettings.mode === key ? "#60a5fa" : "white", margin: 0 }}>
+                          {ru ? info.label : info.labelEn}
+                        </p>
+                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+                          {ru ? info.description : info.descriptionEn}
+                        </p>
+                      </div>
+                      {motivationSettings.mode === key && (
+                        <div style={{ width: "18px", height: "18px", borderRadius: "50%", backgroundColor: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <Check size={11} color="white" />
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Количество уведомлений в день */}
+                <p style={{ fontSize: "12px", fontWeight: 600, color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  {ru ? "Уведомлений в день" : "Per day"}
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => setMotivationSettings(prev => ({ ...prev, timesPerDay: n }))}
+                      style={{
+                        height: "44px", borderRadius: "12px",
+                        border: motivationSettings.timesPerDay === n ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.08)",
+                        backgroundColor: motivationSettings.timesPerDay === n ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.04)",
+                        color: motivationSettings.timesPerDay === n ? "#60a5fa" : "rgba(255,255,255,0.6)",
+                        fontSize: "16px", fontWeight: motivationSettings.timesPerDay === n ? 700 : 400,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {n}×
+                    </button>
+                  ))}
+                </div>
+
+                {/* Расписание */}
+                <div style={{ backgroundColor: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "10px", padding: "10px 12px", marginBottom: "16px" }}>
+                  <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", margin: 0 }}>
+                    📅 {ru ? "Примерное расписание:" : "Approximate schedule:"}
+                    {" "}
+                    {motivationSettings.timesPerDay === 1 && "14:00"}
+                    {motivationSettings.timesPerDay === 2 && "10:00, 19:00"}
+                    {motivationSettings.timesPerDay === 3 && "9:00, 14:00, 20:00"}
+                    {motivationSettings.timesPerDay === 4 && "9:00, 13:00, 17:00, 20:00"}
+                    {motivationSettings.timesPerDay === 5 && "8:00, 11:00, 14:00, 17:00, 20:00"}
+                  </p>
+                </div>
+              </>
+            )}
+
+            <button
+              onClick={() => handleSaveMotivationSettings(motivationSettings)}
+              disabled={motivationLoading}
+              style={{ width: "100%", height: "46px", borderRadius: "12px", border: "none", backgroundColor: "#3b82f6", fontSize: "14px", fontWeight: 600, color: "white", cursor: motivationLoading ? "default" : "pointer", opacity: motivationLoading ? 0.7 : 1 }}
+            >
+              {motivationLoading ? (ru ? "Сохраняю..." : "Saving...") : (ru ? "Сохранить настройки" : "Save settings")}
+            </button>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes bounce { 0%, 100% { transform: translateY(0); opacity: 0.4; } 50% { transform: translateY(-4px); opacity: 1; } }
