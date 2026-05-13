@@ -14,17 +14,16 @@ import {
   Globe, Bell, Shield, Plus, Edit2, X, Palette, Check,
 } from "lucide-react";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
-
-// ============ ТИПЫ ============
+import {
+  doc, getDoc, setDoc,
+  collection, getDocs, deleteDoc, writeBatch, query, where,
+} from "firebase/firestore";
 
 interface MotivationSettings {
   enabled: boolean;
   mode: "soft" | "normal" | "hard" | "off";
   timesPerDay: 1 | 2 | 3 | 4 | 5;
 }
-
-// ============ ВСПОМОГАТЕЛЬНЫЕ КОМПОНЕНТЫ ============
 
 function SectionTitle({
   children,
@@ -52,8 +51,6 @@ function SectionTitle({
   );
 }
 
-// ============ ГЛАВНЫЙ КОМПОНЕНТ ============
-
 export default function SettingsPage() {
   const language = useI18nStore((state) => state.language);
   const setLanguage = useI18nStore((state) => state.setLanguage);
@@ -78,8 +75,8 @@ export default function SettingsPage() {
   const [newCatIcon, setNewCatIcon] = useState("📁");
   const [editingCat, setEditingCat] = useState<CustomCategory | null>(null);
   const [themeSaving, setThemeSaving] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
 
-  // ✅ НОВОЕ: состояние мотивации
   const [motivationSettings, setMotivationSettings] =
     useState<MotivationSettings>({
       enabled: false,
@@ -88,9 +85,6 @@ export default function SettingsPage() {
     });
   const [motivationLoading, setMotivationLoading] = useState(true);
   const [motivationSaving, setMotivationSaving] = useState(false);
-  const [writeAccessGranted, setWriteAccessGranted] = useState<boolean | null>(
-    null
-  );
 
   const modalRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -99,7 +93,6 @@ export default function SettingsPage() {
     const id = getTelegramUserId();
     setUserId(id);
     setSubLoading(true);
-
     Promise.all([getSubscriptionInfo(id), checkSubscription(id)])
       .then(([info, isActive]) => {
         setSubInfo({
@@ -111,7 +104,6 @@ export default function SettingsPage() {
       })
       .catch(() => setSubLoading(false));
 
-    // ✅ НОВОЕ: загружаем настройки мотивации из Firebase
     if (id && id !== "unknown") {
       loadMotivationSettings(id);
     } else {
@@ -119,7 +111,6 @@ export default function SettingsPage() {
     }
   }, []);
 
-  // ✅ НОВОЕ: загрузка настроек мотивации
   async function loadMotivationSettings(uid: string) {
     try {
       const snap = await getDoc(
@@ -128,7 +119,6 @@ export default function SettingsPage() {
       if (snap.exists()) {
         const data = snap.data() as MotivationSettings;
         setMotivationSettings(data);
-        setWriteAccessGranted(data.enabled);
       }
     } catch (e) {
       console.error("Failed to load motivation settings:", e);
@@ -137,37 +127,27 @@ export default function SettingsPage() {
     }
   }
 
-  // ✅ НОВОЕ: запрос write access и включение мотивации
   async function requestMotivationAccess() {
     const tg = (window as any).Telegram?.WebApp;
-    if (!tg) {
-      alert("Откройте приложение через Telegram");
-      return;
-    }
-
+    if (!tg) return;
     setMotivationSaving(true);
-
     try {
       tg.requestWriteAccess(async (granted: boolean) => {
         if (granted) {
-          setWriteAccessGranted(true);
           const newSettings: MotivationSettings = {
             ...motivationSettings,
             enabled: true,
           };
           setMotivationSettings(newSettings);
-
           if (userId && userId !== "unknown") {
             await saveMotivationSettings(userId, newSettings);
           }
-
           tg.showAlert(
             ru
               ? "✅ Мотивация включена!\n\nКаждый день буду присылать тебе мотивирующие сообщения."
               : "✅ Motivation enabled!\n\nI'll send you motivational messages every day."
           );
         } else {
-          setWriteAccessGranted(false);
           tg.showAlert(
             ru
               ? "❌ Доступ отклонён. Бот не сможет присылать уведомления."
@@ -182,20 +162,20 @@ export default function SettingsPage() {
     }
   }
 
-  // ✅ НОВОЕ: сохранение настроек мотивации в Firebase
   async function saveMotivationSettings(
     uid: string,
     settings: MotivationSettings
   ) {
     try {
-      await setDoc(doc(db, "users", uid, "settings", "motivation"), settings);
-      console.log("Motivation settings saved:", settings);
+      await setDoc(
+        doc(db, "users", uid, "settings", "motivation"),
+        settings
+      );
     } catch (e) {
       console.error("Failed to save motivation settings:", e);
     }
   }
 
-  // ✅ НОВОЕ: изменение настроек мотивации (автосохранение)
   async function updateMotivationSetting<K extends keyof MotivationSettings>(
     key: K,
     value: MotivationSettings[K]
@@ -207,14 +187,12 @@ export default function SettingsPage() {
     }
   }
 
-  // ✅ НОВОЕ: отключение мотивации
   async function disableMotivation() {
     const newSettings: MotivationSettings = {
       ...motivationSettings,
       enabled: false,
     };
     setMotivationSettings(newSettings);
-    setWriteAccessGranted(false);
     if (userId && userId !== "unknown") {
       await saveMotivationSettings(userId, newSettings);
     }
@@ -251,7 +229,11 @@ export default function SettingsPage() {
       });
       setEditingCat(null);
     } else {
-      addCategory({ name: newCatName.trim(), color: newCatColor, icon: newCatIcon });
+      addCategory({
+        name: newCatName.trim(),
+        color: newCatColor,
+        icon: newCatIcon,
+      });
     }
     setNewCatName("");
     setNewCatColor("#3b82f6");
@@ -281,11 +263,61 @@ export default function SettingsPage() {
     else window.open("https://t.me/miniapcortexai", "_blank");
   };
 
-  // ============ РЕНДЕР ============
+  // ✅ ИСПРАВЛЕНИЕ: удаляем из Firebase + localStorage + корневой /tasks
+  const handleDeleteAllTasks = () => {
+    const tg = (window as any).Telegram?.WebApp;
+    tg?.showConfirm(
+      ru
+        ? "Удалить все задачи? Это действие нельзя отменить."
+        : "Delete all tasks? This cannot be undone.",
+      async (confirmed: boolean) => {
+        if (!confirmed) return;
+        setDeletingAll(true);
+        try {
+          const uid = getTelegramUserId();
+
+          if (uid !== "unknown") {
+            // 1. Удаляем из users/{uid}/tasks
+            const userTasksSnap = await getDocs(
+              collection(db, "users", uid, "tasks")
+            );
+            const batch1 = writeBatch(db);
+            userTasksSnap.forEach((d) => batch1.delete(d.ref));
+            if (!userTasksSnap.empty) await batch1.commit();
+
+            // 2. Удаляем из корневой /tasks (бот-коллекция)
+            const botTasksSnap = await getDocs(
+              query(collection(db, "tasks"), where("userId", "==", uid))
+            );
+            const batch2 = writeBatch(db);
+            botTasksSnap.forEach((d) => batch2.delete(d.ref));
+            if (!botTasksSnap.empty) await batch2.commit();
+          }
+
+          // 3. Очищаем localStorage
+          localStorage.removeItem("cortex-tasks");
+
+          // 4. Обновляем store
+          useTaskStore.setState({ tasks: [] });
+        } catch (e) {
+          console.error("Delete all tasks error:", e);
+        } finally {
+          setDeletingAll(false);
+        }
+      }
+    );
+  };
 
   return (
     <div style={{ paddingTop: "8px", paddingBottom: "20px" }}>
-      <p style={{ fontSize: "22px", fontWeight: 700, color: "white", margin: "0 0 20px 0" }}>
+      <p
+        style={{
+          fontSize: "22px",
+          fontWeight: 700,
+          color: "white",
+          margin: "0 0 20px 0",
+        }}
+      >
         {ru ? "Настройки" : "Settings"}
       </p>
 
@@ -305,7 +337,13 @@ export default function SettingsPage() {
         }}
       >
         {subLoading ? (
-          <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+          <p
+            style={{
+              fontSize: "14px",
+              color: "rgba(255,255,255,0.4)",
+              margin: 0,
+            }}
+          >
             {ru ? "Проверяем..." : "Checking..."}
           </p>
         ) : (
@@ -402,7 +440,7 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* ==================== МОТИВАЦИЯ (НОВЫЙ РАЗДЕЛ) ==================== */}
+      {/* ==================== МОТИВАЦИЯ ==================== */}
       <SectionTitle>
         <Bell size={13} style={{ marginRight: "5px" }} />
         {ru ? "Мотивация" : "Motivation"}
@@ -421,7 +459,13 @@ export default function SettingsPage() {
         }}
       >
         {motivationLoading ? (
-          <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+          <p
+            style={{
+              fontSize: "14px",
+              color: "rgba(255,255,255,0.4)",
+              margin: 0,
+            }}
+          >
             {ru ? "Загрузка..." : "Loading..."}
           </p>
         ) : (
@@ -461,10 +505,8 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Настройки режима — показываем только если включено */}
             {motivationSettings.enabled && (
               <>
-                {/* Режим мотивации */}
                 <div style={{ marginBottom: "12px" }}>
                   <p
                     style={{
@@ -480,16 +522,14 @@ export default function SettingsPage() {
                   <div style={{ display: "flex", gap: "6px" }}>
                     {(
                       [
-                        { value: "soft",   label: ru ? "🌸 Мягко"      : "🌸 Soft"   },
-                        { value: "normal", label: ru ? "💪 Нормально"  : "💪 Normal" },
-                        { value: "hard",   label: ru ? "🔥 Жёстко"     : "🔥 Hard"   },
+                        { value: "soft",   label: ru ? "🌸 Мягко"     : "🌸 Soft"   },
+                        { value: "normal", label: ru ? "💪 Нормально" : "💪 Normal" },
+                        { value: "hard",   label: ru ? "🔥 Жёстко"    : "🔥 Hard"   },
                       ] as const
                     ).map((opt) => (
                       <button
                         key={opt.value}
-                        onClick={() =>
-                          updateMotivationSetting("mode", opt.value)
-                        }
+                        onClick={() => updateMotivationSetting("mode", opt.value)}
                         style={{
                           flex: 1,
                           height: "36px",
@@ -518,7 +558,6 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* Количество в день */}
                 <div style={{ marginBottom: "14px" }}>
                   <p
                     style={{
@@ -530,7 +569,9 @@ export default function SettingsPage() {
                     }}
                   >
                     {ru ? "Раз в день" : "Times per day"}:{" "}
-                    <span style={{ color: theme.primary, fontWeight: 700 }}>
+                    <span
+                      style={{ color: theme.primary, fontWeight: 700 }}
+                    >
                       {motivationSettings.timesPerDay}×
                     </span>
                   </p>
@@ -569,7 +610,6 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* Тест мотивации */}
                 <div
                   style={{
                     backgroundColor: "rgba(255,255,255,0.04)",
@@ -586,7 +626,6 @@ export default function SettingsPage() {
                     : "Test: send /test_motivation to @aiplannerrubot"}
                 </div>
 
-                {/* Кнопка отключить */}
                 <button
                   onClick={disableMotivation}
                   style={{
@@ -606,7 +645,6 @@ export default function SettingsPage() {
               </>
             )}
 
-            {/* Кнопка включить — показываем если выключено */}
             {!motivationSettings.enabled && (
               <>
                 <div
@@ -618,9 +656,9 @@ export default function SettingsPage() {
                   }}
                 >
                   {[
-                    ru ? "🌸 Мягкий, 💪 нормальный или 🔥 жёсткий стиль" : "🌸 Soft, 💪 normal or 🔥 hard coaching style",
+                    ru ? "🌸 Мягкий, 💪 нормальный или 🔥 жёсткий стиль" : "🌸 Soft, 💪 normal or 🔥 hard style",
                     ru ? "⏰ От 1 до 5 сообщений в день" : "⏰ From 1 to 5 messages per day",
-                    ru ? "🤖 Персонализированные под твои задачи" : "🤖 Personalized based on your tasks",
+                    ru ? "🤖 Персонализированные под твои задачи" : "🤖 Personalized for your tasks",
                   ].map((f) => (
                     <p
                       key={f}
@@ -703,7 +741,13 @@ export default function SettingsPage() {
           marginBottom: "8px",
         }}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr 1fr",
+            gap: "10px",
+          }}
+        >
           {THEMES.map((t) => {
             const isActive = theme.id === t.id;
             return (
@@ -761,7 +805,9 @@ export default function SettingsPage() {
                     height: "20px",
                     borderRadius: "50%",
                     backgroundColor: t.primary,
-                    border: isActive ? "2px solid white" : "2px solid transparent",
+                    border: isActive
+                      ? "2px solid white"
+                      : "2px solid transparent",
                     transition: "border 0.2s",
                   }}
                 />
@@ -920,7 +966,9 @@ export default function SettingsPage() {
                 flexShrink: 0,
               }}
             />
-            <span style={{ fontSize: "14px", color: "white", flex: 1 }}>
+            <span
+              style={{ fontSize: "14px", color: "white", flex: 1 }}
+            >
               {cat.name}
             </span>
             <button
@@ -1010,7 +1058,13 @@ export default function SettingsPage() {
             >
               {value}
             </p>
-            <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+            <p
+              style={{
+                fontSize: "11px",
+                color: "rgba(255,255,255,0.4)",
+                margin: 0,
+              }}
+            >
               {label}
             </p>
           </div>
@@ -1075,11 +1129,25 @@ export default function SettingsPage() {
           marginBottom: "20px",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)" }}
+          >
             Telegram ID
           </span>
-          <span style={{ fontSize: "13px", fontWeight: 600, color: "rgba(255,255,255,0.7)" }}>
+          <span
+            style={{
+              fontSize: "13px",
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.7)",
+            }}
+          >
             {userId || "—"}
           </span>
         </div>
@@ -1090,19 +1158,11 @@ export default function SettingsPage() {
         <Trash2 size={13} style={{ marginRight: "5px" }} />
         {ru ? "Опасная зона" : "Danger zone"}
       </SectionTitle>
+
+      {/* ✅ ИСПРАВЛЕНИЕ: удаляем из Firebase + localStorage */}
       <button
-        onClick={() => {
-          const tg = (window as any).Telegram?.WebApp;
-          tg?.showConfirm(
-            ru ? "Удалить все задачи?" : "Delete all tasks?",
-            (confirmed: boolean) => {
-              if (confirmed) {
-                localStorage.removeItem("cortex-tasks");
-                window.location.reload();
-              }
-            }
-          );
-        }}
+        onClick={handleDeleteAllTasks}
+        disabled={deletingAll}
         style={{
           width: "100%",
           height: "44px",
@@ -1111,8 +1171,8 @@ export default function SettingsPage() {
           backgroundColor: "rgba(239,68,68,0.08)",
           fontSize: "14px",
           fontWeight: 500,
-          color: "#f87171",
-          cursor: "pointer",
+          color: deletingAll ? "rgba(248,113,113,0.5)" : "#f87171",
+          cursor: deletingAll ? "not-allowed" : "pointer",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -1120,7 +1180,9 @@ export default function SettingsPage() {
         }}
       >
         <Trash2 size={16} />
-        {ru ? "Удалить все задачи" : "Delete all tasks"}
+        {deletingAll
+          ? ru ? "Удаляем..." : "Deleting..."
+          : ru ? "Удалить все задачи" : "Delete all tasks"}
       </button>
 
       {/* ==================== МОДАЛКА КАТЕГОРИЙ ==================== */}
@@ -1163,20 +1225,30 @@ export default function SettingsPage() {
                 marginBottom: "16px",
               }}
             >
-              <p style={{ fontSize: "15px", fontWeight: 700, color: "white", margin: 0 }}>
+              <p
+                style={{
+                  fontSize: "15px",
+                  fontWeight: 700,
+                  color: "white",
+                  margin: 0,
+                }}
+              >
                 {editingCat
                   ? ru ? "Изменить раздел" : "Edit section"
                   : ru ? "Новый раздел" : "New section"}
               </p>
               <button
                 onClick={() => setShowAddCategory(false)}
-                style={{ background: "none", border: "none", cursor: "pointer" }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                }}
               >
                 <X size={18} color="rgba(255,255,255,0.4)" />
               </button>
             </div>
 
-            {/* Иконки */}
             <div style={{ marginBottom: "12px" }}>
               <p
                 style={{
@@ -1187,7 +1259,9 @@ export default function SettingsPage() {
               >
                 {ru ? "Иконка" : "Icon"}
               </p>
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              <div
+                style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}
+              >
                 {[
                   "📁","🎂","🌴","💳","🏠","💊",
                   "🏋️","📚","🎯","✈️","🎵","💼",
@@ -1218,7 +1292,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Название */}
             <div style={{ marginBottom: "12px" }}>
               <p
                 style={{
@@ -1253,7 +1326,6 @@ export default function SettingsPage() {
               />
             </div>
 
-            {/* Цвет */}
             <div style={{ marginBottom: "16px" }}>
               <p
                 style={{
@@ -1264,7 +1336,9 @@ export default function SettingsPage() {
               >
                 {ru ? "Цвет" : "Color"}
               </p>
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <div
+                style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}
+              >
                 {[
                   "#3b82f6","#ef4444","#f59e0b","#22c55e",
                   "#a855f7","#ec4899","#06b6d4","#f97316",
