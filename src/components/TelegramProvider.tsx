@@ -2,21 +2,17 @@ import { PropsWithChildren, useEffect } from "react";
 import { initLanguageFromStorage } from "@/lib/i18n";
 import { setupTelegram } from "@/lib/telegram";
 import { usePersistTasks, getTelegramUserId } from "@/lib/store";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { db } from "@/lib/firebase";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 
-// ✅ Регистрируем пользователя в Firebase при каждом открытии приложения
-async function registerUserOnAppOpen() {
+async function registerUserOnOpen() {
   try {
     const tg = (window as any).Telegram?.WebApp;
     if (!tg) return;
-
     const user = tg.initDataUnsafe?.user;
     if (!user?.id) return;
-
     const userId = String(user.id);
-
-    // Сохраняем пользователя — бот увидит его и сможет слать мотивацию
     await setDoc(
       doc(db, "users", userId),
       {
@@ -26,43 +22,29 @@ async function registerUserOnAppOpen() {
         lastName: user.last_name || "",
         username: user.username || "",
         lastSeen: new Date().toISOString(),
-        appVersion: "2.0",
       },
       { merge: true }
     );
-
-    console.log(`✅ User registered: ${userId} (${user.first_name})`);
   } catch (e) {
-    console.error("Register user error:", e);
+    console.error("registerUser:", e);
   }
 }
 
-// ✅ Проверяем и запрашиваем write access если мотивация включена
 async function checkAndRequestWriteAccess() {
   try {
     const tg = (window as any).Telegram?.WebApp;
     if (!tg) return;
-
     const user = tg.initDataUnsafe?.user;
     if (!user?.id) return;
-
     const userId = String(user.id);
-
-    // Проверяем настройки мотивации
-    const settingSnap = await getDoc(
+    const snap = await getDoc(
       doc(db, "users", userId, "settings", "motivation")
     );
-
-    if (!settingSnap.exists()) return;
-
-    const settings = settingSnap.data();
-
-    // Если мотивация включена — тихо запрашиваем write access
-    if (settings.enabled && settings.mode !== "off") {
+    if (!snap.exists()) return;
+    const s = snap.data();
+    if (s.enabled && s.mode !== "off") {
       tg.requestWriteAccess((granted: boolean) => {
-        console.log(`Write access: ${granted ? "granted" : "denied"}`);
         if (!granted) {
-          // Если отказал — отключаем мотивацию чтобы не спамить
           setDoc(
             doc(db, "users", userId, "settings", "motivation"),
             { enabled: false },
@@ -71,25 +53,39 @@ async function checkAndRequestWriteAccess() {
         }
       });
     }
-  } catch (e) {
-    console.error("Write access check error:", e);
-  }
+  } catch {}
 }
 
-export default function TelegramProvider({ children }: PropsWithChildren) {
+function TelegramProviderInner({ children }: PropsWithChildren) {
+  const { loadWorkspaces } = useWorkspace();
   usePersistTasks();
 
   useEffect(() => {
     setupTelegram();
     initLanguageFromStorage();
+    registerUserOnOpen().then(() => checkAndRequestWriteAccess());
 
-    // ✅ При каждом открытии приложения:
-    // 1. Регистрируем пользователя в Firebase
-    // 2. Проверяем и запрашиваем write access для мотивации
-    registerUserOnAppOpen().then(() => {
-      checkAndRequestWriteAccess();
-    });
+    const userId = getTelegramUserId();
+    if (userId !== "unknown") {
+      loadWorkspaces(userId);
+    }
+
+    // Deep link: start_param = workspace id
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      const startParam = tg?.initDataUnsafe?.start_param;
+      if (startParam && startParam.startsWith("w=")) {
+        const wsId = startParam.replace("w=", "");
+        if (wsId) {
+          localStorage.setItem("cortex-active-workspace", wsId);
+        }
+      }
+    } catch {}
   }, []);
 
   return <>{children}</>;
+}
+
+export default function TelegramProvider({ children }: PropsWithChildren) {
+  return <TelegramProviderInner>{children}</TelegramProviderInner>;
 }
