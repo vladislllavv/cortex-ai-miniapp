@@ -14,22 +14,26 @@ import {
   query,
   where,
 } from "firebase/firestore";
+import { paths, PERSONAL_WORKSPACE_ID } from "./workspacePaths";
+
+// ============ ТИПЫ ============
 
 export type TaskPriority = "low" | "medium" | "high";
 export type TaskStatus = "todo" | "in_progress" | "done";
-
-// ✅ Расширенный тип repeat
-export type TaskRepeat = "none" | "daily" | "weekdays" | "weekends" | string;
-// string покрывает "custom:mon,wed,fri"
-
+export type TaskRepeat =
+  | "none"
+  | "daily"
+  | "weekdays"
+  | "weekends"
+  | string;
 export type TaskType = "task" | "shopping";
 
 export type Task = {
   id: string;
   title: string;
   description?: string;
-  dueDate?: string;          // ✅ Реальный дедлайн (без смещения)
-  reminderOffsetMinutes?: number; // ✅ Смещение напоминания в минутах
+  dueDate?: string;
+  reminderOffsetMinutes?: number;
   priority: TaskPriority;
   status: TaskStatus;
   isAiCreated: boolean;
@@ -41,6 +45,9 @@ export type Task = {
   category?: string;
   type: TaskType;
   items?: string[];
+  workspaceId?: string;
+  assigneeUserId?: string;
+  createdBy?: string;
 };
 
 export type Birthday = {
@@ -81,6 +88,8 @@ export type ChatMessage = {
   timestamp?: number;
 };
 
+// ============ STORE TYPE ============
+
 type TaskStore = {
   tasks: Task[];
   birthdays: Birthday[];
@@ -90,28 +99,30 @@ type TaskStore = {
   selectedDate: string | null;
   isDataLoaded: boolean;
   isSynced: boolean;
+  activeWorkspaceId: string;
 
+  setActiveWorkspaceId: (id: string) => void;
   addTask: (task: Omit<Task, "id" | "createdAt" | "notified">) => Promise<Task>;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
   toggleTaskStatus: (taskId: string) => void;
   setSelectedDate: (date: string | null) => void;
 
-  addBirthday: (birthday: Omit<Birthday, "id">) => Promise<void>;
+  addBirthday: (b: Omit<Birthday, "id">) => Promise<void>;
   deleteBirthday: (id: string) => Promise<void>;
 
-  addVacation: (vacation: Omit<Vacation, "id">) => Promise<void>;
+  addVacation: (v: Omit<Vacation, "id">) => Promise<void>;
   deleteVacation: (id: string) => Promise<void>;
 
-  addCategory: (category: Omit<CustomCategory, "id">) => void;
+  addCategory: (c: Omit<CustomCategory, "id">) => void;
   updateCategory: (id: string, updates: Partial<CustomCategory>) => void;
   deleteCategory: (id: string) => void;
 
-  addCategoryEvent: (event: Omit<CategoryEvent, "id">) => Promise<void>;
+  addCategoryEvent: (e: Omit<CategoryEvent, "id">) => Promise<void>;
   deleteCategoryEvent: (id: string) => Promise<void>;
 
-  loadUserData: (userId: string) => Promise<void>;
-  startSync: (userId: string) => () => void;
+  loadUserData: (userId: string, workspaceId: string) => Promise<void>;
+  startSync: (userId: string, workspaceId: string) => () => void;
 };
 
 // ============ STORAGE KEYS ============
@@ -136,8 +147,8 @@ export function saveChatHistory(messages: ChatMessage[]) {
 
 export function loadChatHistory(): ChatMessage[] {
   try {
-    const stored = localStorage.getItem(CHAT_STORAGE_KEY);
-    if (stored) return JSON.parse(stored);
+    const s = localStorage.getItem(CHAT_STORAGE_KEY);
+    if (s) return JSON.parse(s);
   } catch {}
   return [];
 }
@@ -154,8 +165,8 @@ export function saveCoachChatHistory(messages: ChatMessage[]) {
 
 export function loadCoachChatHistory(): ChatMessage[] {
   try {
-    const stored = localStorage.getItem(COACH_CHAT_STORAGE_KEY);
-    if (stored) return JSON.parse(stored);
+    const s = localStorage.getItem(COACH_CHAT_STORAGE_KEY);
+    if (s) return JSON.parse(s);
   } catch {}
   return [];
 }
@@ -167,14 +178,13 @@ async function saveChatToFirebase(
 ) {
   if (userId === "unknown") return;
   try {
-    const trimmed = messages.slice(-50);
-    await setDoc(doc(db, "users", userId, "chats", chatId), {
-      messages: trimmed,
+    await setDoc(doc(db, paths.chat(userId, chatId)), {
+      messages: messages.slice(-50),
       updatedAt: new Date().toISOString(),
       userId,
     });
   } catch (e: any) {
-    console.error("Chat save error:", e.message);
+    console.error("Chat save:", e.message);
   }
 }
 
@@ -184,14 +194,9 @@ export async function loadChatFromFirebase(
 ): Promise<ChatMessage[]> {
   if (userId === "unknown") return [];
   try {
-    const snap = await getDoc(doc(db, "users", userId, "chats", chatId));
-    if (snap.exists()) {
-      const data = snap.data();
-      return (data.messages || []) as ChatMessage[];
-    }
-  } catch (e: any) {
-    console.error("Chat load error:", e.message);
-  }
+    const snap = await getDoc(doc(db, paths.chat(userId, chatId)));
+    if (snap.exists()) return (snap.data().messages || []) as ChatMessage[];
+  } catch {}
   return [];
 }
 
@@ -212,9 +217,9 @@ export function getTelegramUserId(): string {
 export async function checkSubscription(userId: string): Promise<boolean> {
   try {
     if (userId === "unknown") return false;
-    const subDoc = await getDoc(doc(db, "subscriptions", userId));
-    if (!subDoc.exists()) return false;
-    const data = subDoc.data();
+    const d = await getDoc(doc(db, paths.subscription(userId)));
+    if (!d.exists()) return false;
+    const data = d.data();
     if (!data.isActive || !data.expiresAt) return false;
     return data.expiresAt.toDate() > new Date();
   } catch {
@@ -230,10 +235,10 @@ export async function getSubscriptionInfo(userId: string): Promise<{
   try {
     if (userId === "unknown")
       return { isActive: false, expiresAt: null, daysLeft: 0 };
-    const subDoc = await getDoc(doc(db, "subscriptions", userId));
-    if (!subDoc.exists())
+    const d = await getDoc(doc(db, paths.subscription(userId)));
+    if (!d.exists())
       return { isActive: false, expiresAt: null, daysLeft: 0 };
-    const data = subDoc.data();
+    const data = d.data();
     if (!data.isActive || !data.expiresAt)
       return { isActive: false, expiresAt: null, daysLeft: 0 };
     const expiresAt = data.expiresAt.toDate();
@@ -248,7 +253,6 @@ export async function getSubscriptionInfo(userId: string): Promise<{
 
 // ============ HELPERS ============
 
-// ✅ Нормализация repeat — сохраняем все варианты
 function normalizeRepeat(repeat: any): TaskRepeat {
   if (!repeat || repeat === "none") return "none";
   if (repeat === "daily") return "daily";
@@ -277,10 +281,13 @@ function normalizeTask(task: any): Task {
     category: task.category || "",
     type: task.type === "shopping" ? "shopping" : "task",
     items: task.items || [],
+    workspaceId: task.workspaceId || PERSONAL_WORKSPACE_ID,
+    assigneeUserId: task.assigneeUserId,
+    createdBy: task.createdBy,
   };
 }
 
-function resetDailyTasks(tasks: Task[]): Task[] {
+function resetDailyLike(tasks: Task[]): Task[] {
   const todayStr = new Date().toISOString().split("T")[0];
   return tasks.map((task) => {
     if (task.status !== "done") return task;
@@ -304,11 +311,10 @@ function resetDailyTasks(tasks: Task[]): Task[] {
 }
 
 function loadTasks(): Task[] {
-  if (typeof window === "undefined") return [];
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
+    const s = localStorage.getItem(STORAGE_KEY);
+    if (s) {
+      const parsed = JSON.parse(s);
       if (Array.isArray(parsed)) return parsed.map(normalizeTask);
     }
   } catch {}
@@ -316,7 +322,6 @@ function loadTasks(): Task[] {
 }
 
 function saveTasks(tasks: Task[]) {
-  if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
   } catch {}
@@ -324,12 +329,12 @@ function saveTasks(tasks: Task[]) {
 
 function loadCategories(): CustomCategory[] {
   try {
-    const stored = localStorage.getItem(CATEGORIES_KEY);
-    if (stored) return JSON.parse(stored);
+    const s = localStorage.getItem(CATEGORIES_KEY);
+    if (s) return JSON.parse(s);
   } catch {}
   return [
     { id: "birthdays", name: "Дни рождения", color: "#3b82f6", icon: "🎂" },
-    { id: "vacations", name: "Отпуска", color: "#22c55e", icon: "🌴" },
+    { id: "vacations",  name: "Отпуска",      color: "#22c55e", icon: "🌴" },
   ];
 }
 
@@ -341,8 +346,8 @@ function saveCategories(cats: CustomCategory[]) {
 
 function loadCategoryEvents(): CategoryEvent[] {
   try {
-    const stored = localStorage.getItem(CATEGORY_EVENTS_KEY);
-    if (stored) return JSON.parse(stored);
+    const s = localStorage.getItem(CATEGORY_EVENTS_KEY);
+    if (s) return JSON.parse(s);
   } catch {}
   return [];
 }
@@ -353,40 +358,63 @@ function saveCategoryEventsLocal(events: CategoryEvent[]) {
   } catch {}
 }
 
-// ============ FIREBASE BOT TASKS — ЦЕНТРАЛИЗОВАННО ============
+// ============ FIREBASE TASK OPS ============
 
-// ✅ Вычисляем реальное время напоминания из dueDate + offset
 function computeReminderAt(dueDate: string, offsetMinutes: number): Date {
-  const due = new Date(dueDate);
-  return new Date(due.getTime() - offsetMinutes * 60 * 1000);
+  return new Date(new Date(dueDate).getTime() - offsetMinutes * 60 * 1000);
 }
 
-// ✅ UPSERT: создаём или обновляем запись в /tasks для бота
-async function upsertBotTask(task: Task, userId: string) {
-  if (userId === "unknown" || !task.dueDate) return;
+async function saveTaskToFirebase(
+  task: Task,
+  userId: string,
+  workspaceId: string
+) {
+  if (userId === "unknown") return;
+  try {
+    const offset = task.reminderOffsetMinutes ?? 0;
+    let reminderAt = null;
+    if (task.dueDate) {
+      const d = computeReminderAt(task.dueDate, offset);
+      if (!isNaN(d.getTime())) reminderAt = Timestamp.fromDate(d);
+    }
+    await setDoc(doc(db, paths.task(userId, workspaceId, task.id)), {
+      ...task,
+      userId,
+      workspaceId,
+      isSent: false,
+      reminderAt,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (e: any) {
+    console.error("saveTaskToFirebase:", e.message);
+  }
+}
 
+async function upsertBotTask(
+  task: Task,
+  userId: string,
+  workspaceId: string
+) {
+  if (userId === "unknown" || !task.dueDate) return;
   try {
     const dueDate = new Date(task.dueDate);
     if (isNaN(dueDate.getTime())) return;
-
-    const offsetMinutes = task.reminderOffsetMinutes ?? 0;
-    const reminderAt = computeReminderAt(task.dueDate, offsetMinutes);
-
-    // Если время напоминания уже прошло — не создаём
+    const offset = task.reminderOffsetMinutes ?? 0;
+    const reminderAt = computeReminderAt(task.dueDate, offset);
     if (reminderAt <= new Date()) return;
 
-    // Ищем существующую запись по taskId + userId
     const existing = await getDocs(
       query(
-        collection(db, "tasks"),
+        collection(db, paths.botTasks()),
         where("taskId", "==", task.id),
         where("userId", "==", userId)
       )
     );
 
-    const botTaskData = {
+    const data = {
       userId,
       taskId: task.id,
+      workspaceId,
       title: task.title,
       description: task.description || "",
       dueDate: task.dueDate,
@@ -397,89 +425,111 @@ async function upsertBotTask(task: Task, userId: string) {
       reminderAt: Timestamp.fromDate(reminderAt),
       repeat: task.repeat || "none",
       type: task.type || "task",
-      reminderOffsetMinutes: offsetMinutes,
+      reminderOffsetMinutes: offset,
       updatedAt: new Date().toISOString(),
     };
 
     if (!existing.empty) {
-      // ✅ Обновляем существующую запись (при смене дедлайна)
-      const existingDoc = existing.docs[0];
-      await setDoc(doc(db, "tasks", existingDoc.id), botTaskData);
+      await setDoc(doc(db, paths.botTasks(), existing.docs[0].id), data);
     } else {
-      // ✅ Создаём новую запись
-      const newRef = doc(collection(db, "tasks"));
-      await setDoc(newRef, botTaskData);
+      await setDoc(doc(collection(db, paths.botTasks())), data);
     }
-
-    console.log(`✅ Bot task upserted: ${task.title} at ${reminderAt.toISOString()}`);
   } catch (e: any) {
-    console.error("Bot task upsert error:", e.message);
+    console.error("upsertBotTask:", e.message);
   }
 }
 
-// ✅ Удаляем все записи в /tasks для данной задачи
 async function deleteBotTask(taskId: string, userId: string) {
   if (userId === "unknown") return;
   try {
     const existing = await getDocs(
       query(
-        collection(db, "tasks"),
+        collection(db, paths.botTasks()),
         where("taskId", "==", taskId),
         where("userId", "==", userId)
       )
     );
-    const batch = writeBatch(db);
-    existing.forEach((d) => batch.delete(d.ref));
-    if (!existing.empty) await batch.commit();
+    const b = writeBatch(db);
+    existing.forEach((d) => b.delete(d.ref));
+    if (!existing.empty) await b.commit();
   } catch (e: any) {
-    console.error("Delete bot task error:", e.message);
+    console.error("deleteBotTask:", e.message);
   }
 }
 
-async function saveTaskToFirebase(task: Task, userId: string) {
+async function deleteTaskFromFirebase(
+  taskId: string,
+  userId: string,
+  workspaceId: string
+) {
   if (userId === "unknown") return;
   try {
-    const offsetMinutes = task.reminderOffsetMinutes ?? 0;
-    let reminderAt = null;
-    if (task.dueDate) {
-      const date = computeReminderAt(task.dueDate, offsetMinutes);
-      if (!isNaN(date.getTime())) reminderAt = Timestamp.fromDate(date);
-    }
-    await setDoc(doc(db, "users", userId, "tasks", task.id), {
-      ...task,
-      userId,
-      isSent: false,
-      reminderAt,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (e: any) {
-    console.error("Firebase save error:", e.message);
-  }
-}
-
-async function deleteTaskFromFirebase(taskId: string, userId: string) {
-  if (userId === "unknown") return;
-  try {
-    await deleteDoc(doc(db, "users", userId, "tasks", taskId));
+    await deleteDoc(doc(db, paths.task(userId, workspaceId, taskId)));
   } catch {}
 }
 
-// ✅ Синхронизируем все задачи с датой в /tasks при загрузке
-async function syncAllTasksForBot(tasks: Task[], userId: string) {
+async function syncAllTasksForBot(
+  tasks: Task[],
+  userId: string,
+  workspaceId: string
+) {
   if (userId === "unknown") return;
   const now = new Date();
   for (const task of tasks) {
     if (!task.dueDate || task.status === "done") continue;
-    const offsetMinutes = task.reminderOffsetMinutes ?? 0;
-    const reminderAt = computeReminderAt(task.dueDate, offsetMinutes);
+    const offset = task.reminderOffsetMinutes ?? 0;
+    const reminderAt = computeReminderAt(task.dueDate, offset);
     if (reminderAt <= now) continue;
-    await upsertBotTask(task, userId).catch(() => {});
+    await upsertBotTask(task, userId, workspaceId).catch(() => {});
+  }
+}
+
+// ============ MIGRATION ============
+
+export async function migrateTasksIfNeeded(userId: string) {
+  if (userId === "unknown") return;
+  const MIGRATION_KEY = "cortex-migration-v2-done";
+  if (localStorage.getItem(MIGRATION_KEY)) return;
+
+  try {
+    // Проверяем есть ли старые задачи
+    const legacySnap = await getDocs(
+      collection(db, paths.legacyTasks(userId))
+    );
+    if (legacySnap.empty) {
+      localStorage.setItem(MIGRATION_KEY, "1");
+      return;
+    }
+
+    console.log(
+      `[Migration] Migrating ${legacySnap.size} tasks to workspace...`
+    );
+
+    const batch = writeBatch(db);
+    legacySnap.forEach((d) => {
+      const data = d.data();
+      const newRef = doc(
+        db,
+        paths.task(userId, PERSONAL_WORKSPACE_ID, d.id)
+      );
+      batch.set(newRef, {
+        ...data,
+        workspaceId: PERSONAL_WORKSPACE_ID,
+        updatedAt: new Date().toISOString(),
+      });
+    });
+    await batch.commit();
+
+    localStorage.setItem(MIGRATION_KEY, "1");
+    console.log("[Migration] Done ✅");
+  } catch (e: any) {
+    console.error("[Migration] Error:", e.message);
   }
 }
 
 // ============ STORE ============
 
-export const useTaskStore = create<TaskStore>((set) => ({
+export const useTaskStore = create<TaskStore>((set, get) => ({
   tasks: loadTasks(),
   birthdays: [],
   vacations: [],
@@ -488,8 +538,16 @@ export const useTaskStore = create<TaskStore>((set) => ({
   selectedDate: null,
   isDataLoaded: false,
   isSynced: false,
+  activeWorkspaceId: PERSONAL_WORKSPACE_ID,
+
+  setActiveWorkspaceId: (id) => {
+    set({ activeWorkspaceId: id, isDataLoaded: false, tasks: [] });
+  },
 
   addTask: async (task) => {
+    const userId = getTelegramUserId();
+    const workspaceId = get().activeWorkspaceId;
+
     const newTask: Task = {
       ...task,
       id: crypto.randomUUID(),
@@ -502,6 +560,8 @@ export const useTaskStore = create<TaskStore>((set) => ({
       items: task.items || [],
       dueDate: task.dueDate || undefined,
       reminderOffsetMinutes: task.reminderOffsetMinutes ?? 0,
+      workspaceId,
+      createdBy: userId !== "unknown" ? userId : undefined,
     };
 
     set((state) => {
@@ -510,33 +570,30 @@ export const useTaskStore = create<TaskStore>((set) => ({
       return { tasks: updated };
     });
 
-    const userId = getTelegramUserId();
-    // ✅ Единая точка записи в Firebase
-    await saveTaskToFirebase(newTask, userId).catch(console.error);
-    await upsertBotTask(newTask, userId).catch(console.error);
-
+    await saveTaskToFirebase(newTask, userId, workspaceId).catch(console.error);
+    await upsertBotTask(newTask, userId, workspaceId).catch(console.error);
     return newTask;
   },
 
   updateTask: (taskId, updates) => {
+    const userId = getTelegramUserId();
+    const workspaceId = get().activeWorkspaceId;
+
     set((state) => {
       const updated = state.tasks.map((t) =>
         t.id === taskId
-          ? normalizeTask({
-              ...t,
-              ...updates,
-              updatedAt: new Date().toISOString(),
-            })
+          ? normalizeTask({ ...t, ...updates, updatedAt: new Date().toISOString() })
           : t
       );
       saveTasks(updated);
-      const userId = getTelegramUserId();
       const updatedTask = updated.find((t) => t.id === taskId);
       if (updatedTask) {
-        saveTaskToFirebase(updatedTask, userId).catch(console.error);
-        // ✅ Обновляем бот-запись при изменении дедлайна или offset
-        if (updates.dueDate !== undefined || updates.reminderOffsetMinutes !== undefined) {
-          upsertBotTask(updatedTask, userId).catch(console.error);
+        saveTaskToFirebase(updatedTask, userId, workspaceId).catch(console.error);
+        if (
+          updates.dueDate !== undefined ||
+          updates.reminderOffsetMinutes !== undefined
+        ) {
+          upsertBotTask(updatedTask, userId, workspaceId).catch(console.error);
         }
       }
       return { tasks: updated };
@@ -544,20 +601,24 @@ export const useTaskStore = create<TaskStore>((set) => ({
   },
 
   deleteTask: (taskId) => {
+    const userId = getTelegramUserId();
+    const workspaceId = get().activeWorkspaceId;
+
     set((state) => {
       const updated = state.tasks.filter((t) => t.id !== taskId);
       saveTasks(updated);
-      const userId = getTelegramUserId();
-      // ✅ Удаляем из обоих мест
-      deleteTaskFromFirebase(taskId, userId).catch(console.error);
+      deleteTaskFromFirebase(taskId, userId, workspaceId).catch(console.error);
       deleteBotTask(taskId, userId).catch(console.error);
       return { tasks: updated };
     });
   },
 
   toggleTaskStatus: (taskId) => {
+    const userId = getTelegramUserId();
+    const workspaceId = get().activeWorkspaceId;
+    const now = new Date().toISOString();
+
     set((state) => {
-      const now = new Date().toISOString();
       const updated = state.tasks.map((t) => {
         if (t.id !== taskId) return t;
         const newStatus = t.status === "done" ? "todo" : "done";
@@ -569,10 +630,9 @@ export const useTaskStore = create<TaskStore>((set) => ({
         };
       });
       saveTasks(updated);
-      const userId = getTelegramUserId();
       const updatedTask = updated.find((t) => t.id === taskId);
       if (updatedTask)
-        saveTaskToFirebase(updatedTask, userId).catch(console.error);
+        saveTaskToFirebase(updatedTask, userId, workspaceId).catch(console.error);
       return { tasks: updated };
     });
   },
@@ -581,56 +641,48 @@ export const useTaskStore = create<TaskStore>((set) => ({
 
   addBirthday: async (birthday) => {
     const id = crypto.randomUUID();
-    const newBirthday: Birthday = { ...birthday, id };
-    set((state) => ({ birthdays: [...state.birthdays, newBirthday] }));
+    const nb: Birthday = { ...birthday, id };
+    set((s) => ({ birthdays: [...s.birthdays, nb] }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      setDoc(doc(db, "users", userId, "birthdays", id), newBirthday).catch(
-        console.error
-      );
+      setDoc(doc(db, paths.birthday(userId, id)), nb).catch(console.error);
   },
 
   deleteBirthday: async (id) => {
-    set((state) => ({
-      birthdays: state.birthdays.filter((b) => b.id !== id),
-    }));
+    set((s) => ({ birthdays: s.birthdays.filter((b) => b.id !== id) }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(doc(db, "users", userId, "birthdays", id)).catch(console.error);
+      deleteDoc(doc(db, paths.birthday(userId, id))).catch(console.error);
   },
 
   addVacation: async (vacation) => {
     const id = crypto.randomUUID();
-    const newVacation: Vacation = { ...vacation, id };
-    set((state) => ({ vacations: [...state.vacations, newVacation] }));
+    const nv: Vacation = { ...vacation, id };
+    set((s) => ({ vacations: [...s.vacations, nv] }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      setDoc(doc(db, "users", userId, "vacations", id), newVacation).catch(
-        console.error
-      );
+      setDoc(doc(db, paths.vacation(userId, id)), nv).catch(console.error);
   },
 
   deleteVacation: async (id) => {
-    set((state) => ({
-      vacations: state.vacations.filter((v) => v.id !== id),
-    }));
+    set((s) => ({ vacations: s.vacations.filter((v) => v.id !== id) }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(doc(db, "users", userId, "vacations", id)).catch(console.error);
+      deleteDoc(doc(db, paths.vacation(userId, id))).catch(console.error);
   },
 
   addCategory: (category) => {
     const id = crypto.randomUUID();
-    set((state) => {
-      const updated = [...state.categories, { ...category, id }];
+    set((s) => {
+      const updated = [...s.categories, { ...category, id }];
       saveCategories(updated);
       return { categories: updated };
     });
   },
 
   updateCategory: (id, updates) =>
-    set((state) => {
-      const updated = state.categories.map((c) =>
+    set((s) => {
+      const updated = s.categories.map((c) =>
         c.id === id ? { ...c, ...updates } : c
       );
       saveCategories(updated);
@@ -638,85 +690,81 @@ export const useTaskStore = create<TaskStore>((set) => ({
     }),
 
   deleteCategory: (id) =>
-    set((state) => {
-      const updatedCats = state.categories.filter((c) => c.id !== id);
-      const updatedEvents = state.categoryEvents.filter(
-        (e) => e.categoryId !== id
-      );
-      saveCategories(updatedCats);
-      saveCategoryEventsLocal(updatedEvents);
-      return { categories: updatedCats, categoryEvents: updatedEvents };
+    set((s) => {
+      const cats = s.categories.filter((c) => c.id !== id);
+      const events = s.categoryEvents.filter((e) => e.categoryId !== id);
+      saveCategories(cats);
+      saveCategoryEventsLocal(events);
+      return { categories: cats, categoryEvents: events };
     }),
 
   addCategoryEvent: async (event) => {
     const id = crypto.randomUUID();
-    const newEvent: CategoryEvent = { ...event, id };
-    set((state) => {
-      const updated = [...state.categoryEvents, newEvent];
+    const ne: CategoryEvent = { ...event, id };
+    set((s) => {
+      const updated = [...s.categoryEvents, ne];
       saveCategoryEventsLocal(updated);
       return { categoryEvents: updated };
     });
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      setDoc(
-        doc(db, "users", userId, "categoryEvents", id),
-        newEvent
-      ).catch(console.error);
+      setDoc(doc(db, paths.categoryEvent(userId, id)), ne).catch(console.error);
   },
 
   deleteCategoryEvent: async (id) => {
-    set((state) => {
-      const updated = state.categoryEvents.filter((e) => e.id !== id);
+    set((s) => {
+      const updated = s.categoryEvents.filter((e) => e.id !== id);
       saveCategoryEventsLocal(updated);
       return { categoryEvents: updated };
     });
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(
-        doc(db, "users", userId, "categoryEvents", id)
-      ).catch(console.error);
+      deleteDoc(doc(db, paths.categoryEvent(userId, id))).catch(console.error);
   },
 
-  loadUserData: async (userId) => {
+  loadUserData: async (userId, workspaceId) => {
     if (userId === "unknown") {
       set({ isDataLoaded: true });
       return;
     }
+
     try {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
       const todayStr = new Date().toISOString().split("T")[0];
 
-      const [birthdaysSnap, vacationsSnap, categoryEventsSnap, tasksSnap] =
-        await Promise.all([
-          getDocs(collection(db, "users", userId, "birthdays")),
-          getDocs(collection(db, "users", userId, "vacations")),
-          getDocs(collection(db, "users", userId, "categoryEvents")),
-          getDocs(collection(db, "users", userId, "tasks")),
-        ]);
+      const [bSnap, vSnap, ceSnap, tSnap] = await Promise.all([
+        getDocs(collection(db, paths.birthdays(userId))),
+        getDocs(collection(db, paths.vacations(userId))),
+        getDocs(collection(db, paths.categoryEvents(userId))),
+        getDocs(collection(db, paths.tasks(userId, workspaceId))),
+      ]);
 
       const birthdays: Birthday[] = [];
-      birthdaysSnap.forEach((d) => birthdays.push(d.data() as Birthday));
+      bSnap.forEach((d) => birthdays.push(d.data() as Birthday));
 
       const vacations: Vacation[] = [];
-      vacationsSnap.forEach((d) => vacations.push(d.data() as Vacation));
+      vSnap.forEach((d) => vacations.push(d.data() as Vacation));
 
       const categoryEvents: CategoryEvent[] = [];
-      categoryEventsSnap.forEach((d) =>
-        categoryEvents.push(d.data() as CategoryEvent)
-      );
+      ceSnap.forEach((d) => categoryEvents.push(d.data() as CategoryEvent));
 
       const cloudMap = new Map<string, Task>();
       const batch = writeBatch(db);
       let hasChanges = false;
 
-      tasksSnap.forEach((d) => {
+      tSnap.forEach((d) => {
         const data = d.data();
+        const isDailyLike =
+          data.repeat === "daily" ||
+          data.repeat === "weekdays" ||
+          data.repeat === "weekends" ||
+          (typeof data.repeat === "string" && data.repeat.startsWith("custom:"));
 
         if (
           data.status === "done" &&
           data.completedAt &&
-          data.repeat === "none"
+          !isDailyLike
         ) {
           if (new Date(data.completedAt) < yesterday) {
             batch.delete(d.ref);
@@ -725,17 +773,9 @@ export const useTaskStore = create<TaskStore>((set) => ({
           }
         }
 
-        const isDailyLike =
-          data.repeat === "daily" ||
-          data.repeat === "weekdays" ||
-          data.repeat === "weekends" ||
-          (typeof data.repeat === "string" &&
-            data.repeat.startsWith("custom:"));
-
         if (isDailyLike && data.status === "done" && data.completedAt) {
-          const completedDay = data.completedAt.split("T")[0];
-          if (completedDay < todayStr) {
-            const resetTask = normalizeTask({
+          if (data.completedAt.split("T")[0] < todayStr) {
+            const reset = normalizeTask({
               ...data,
               id: d.id,
               status: "todo",
@@ -746,10 +786,9 @@ export const useTaskStore = create<TaskStore>((set) => ({
               status: "todo",
               completedAt: null,
               updatedAt: new Date().toISOString(),
-              isSent: false,
             });
             hasChanges = true;
-            cloudMap.set(d.id, resetTask);
+            cloudMap.set(d.id, reset);
             return;
           }
         }
@@ -759,51 +798,49 @@ export const useTaskStore = create<TaskStore>((set) => ({
 
       if (hasChanges) await batch.commit();
 
-      const localTasks = loadTasks();
+      const localTasks = loadTasks().filter(
+        (t) => (t.workspaceId || PERSONAL_WORKSPACE_ID) === workspaceId
+      );
       const localMap = new Map(localTasks.map((t) => [t.id, t]));
-      const mergedTasks: Task[] = [];
+      const merged: Task[] = [];
 
-      cloudMap.forEach((cloudTask) => {
-        const localTask = localMap.get(cloudTask.id);
-        if (localTask) {
-          const cloudTime =
-            cloudTask.updatedAt ||
-            cloudTask.completedAt ||
-            cloudTask.createdAt ||
-            "";
-          const localTime =
-            localTask.updatedAt ||
-            localTask.completedAt ||
-            localTask.createdAt ||
-            "";
-          mergedTasks.push(cloudTime >= localTime ? cloudTask : localTask);
+      cloudMap.forEach((cloud) => {
+        const local = localMap.get(cloud.id);
+        if (local) {
+          const ct = cloud.updatedAt || cloud.createdAt || "";
+          const lt = local.updatedAt || local.createdAt || "";
+          merged.push(ct >= lt ? cloud : local);
         } else {
-          mergedTasks.push(cloudTask);
+          merged.push(cloud);
         }
       });
 
-      localMap.forEach((localTask) => {
-        if (!cloudMap.has(localTask.id)) {
+      localMap.forEach((local) => {
+        if (!cloudMap.has(local.id)) {
           if (
-            localTask.status === "done" &&
-            localTask.completedAt &&
-            localTask.repeat === "none"
+            local.status === "done" &&
+            local.completedAt &&
+            local.repeat === "none"
           ) {
-            if (new Date(localTask.completedAt) < yesterday) return;
+            if (new Date(local.completedAt) < yesterday) return;
           }
-          mergedTasks.push(localTask);
-          saveTaskToFirebase(localTask, userId).catch(console.error);
-          upsertBotTask(localTask, userId).catch(console.error);
+          merged.push(local);
+          saveTaskToFirebase(local, userId, workspaceId).catch(console.error);
+          upsertBotTask(local, userId, workspaceId).catch(console.error);
         }
       });
 
-      saveTasks(mergedTasks);
+      // Объединяем с задачами других workspace из localStorage
+      const otherTasks = loadTasks().filter(
+        (t) => (t.workspaceId || PERSONAL_WORKSPACE_ID) !== workspaceId
+      );
+      const allTasks = [...otherTasks, ...merged];
+      saveTasks(allTasks);
 
       const localEvents = loadCategoryEvents();
       const mergedEvents = [...categoryEvents];
       localEvents.forEach((le) => {
-        if (!mergedEvents.find((e) => e.id === le.id))
-          mergedEvents.push(le);
+        if (!mergedEvents.find((e) => e.id === le.id)) mergedEvents.push(le);
       });
       saveCategoryEventsLocal(mergedEvents);
 
@@ -811,25 +848,24 @@ export const useTaskStore = create<TaskStore>((set) => ({
         birthdays,
         vacations,
         categoryEvents: mergedEvents,
-        tasks: mergedTasks,
+        tasks: merged,
         isDataLoaded: true,
       });
 
-      // Синхронизируем бот-задачи через 2 сек после загрузки
       setTimeout(() => {
-        syncAllTasksForBot(mergedTasks, userId).catch(console.error);
+        syncAllTasksForBot(merged, userId, workspaceId).catch(console.error);
       }, 2000);
     } catch (e) {
-      console.error("Load user data error:", e);
+      console.error("loadUserData:", e);
       set({ isDataLoaded: true });
     }
   },
 
-  startSync: (userId) => {
+  startSync: (userId, workspaceId) => {
     if (userId === "unknown") return () => {};
 
-    const unsubTasks = onSnapshot(
-      collection(db, "users", userId, "tasks"),
+    const unsub = onSnapshot(
+      collection(db, paths.tasks(userId, workspaceId)),
       { includeMetadataChanges: false },
       (snapshot) => {
         if (snapshot.metadata.fromCache) return;
@@ -837,20 +873,10 @@ export const useTaskStore = create<TaskStore>((set) => ({
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         const todayStr = new Date().toISOString().split("T")[0];
-
         const cloudMap = new Map<string, Task>();
 
         snapshot.forEach((d) => {
           const data = d.data();
-
-          if (
-            data.status === "done" &&
-            data.completedAt &&
-            data.repeat === "none"
-          ) {
-            if (new Date(data.completedAt) < yesterday) return;
-          }
-
           const isDailyLike =
             data.repeat === "daily" ||
             data.repeat === "weekdays" ||
@@ -858,17 +884,19 @@ export const useTaskStore = create<TaskStore>((set) => ({
             (typeof data.repeat === "string" &&
               data.repeat.startsWith("custom:"));
 
+          if (
+            data.status === "done" &&
+            data.completedAt &&
+            !isDailyLike &&
+            new Date(data.completedAt) < yesterday
+          )
+            return;
+
           if (isDailyLike && data.status === "done" && data.completedAt) {
-            const completedDay = data.completedAt.split("T")[0];
-            if (completedDay < todayStr) {
+            if (data.completedAt.split("T")[0] < todayStr) {
               cloudMap.set(
                 d.id,
-                normalizeTask({
-                  ...data,
-                  id: d.id,
-                  status: "todo",
-                  completedAt: undefined,
-                })
+                normalizeTask({ ...data, id: d.id, status: "todo", completedAt: undefined })
               );
               return;
             }
@@ -878,58 +906,63 @@ export const useTaskStore = create<TaskStore>((set) => ({
         });
 
         set((state) => {
+          const otherTasks = state.tasks.filter(
+            (t) => (t.workspaceId || PERSONAL_WORKSPACE_ID) !== workspaceId
+          );
+          const currentTasks = state.tasks.filter(
+            (t) => (t.workspaceId || PERSONAL_WORKSPACE_ID) === workspaceId
+          );
+          const localMap = new Map(currentTasks.map((t) => [t.id, t]));
           const merged: Task[] = [];
-          const localMap = new Map(state.tasks.map((t) => [t.id, t]));
 
-          cloudMap.forEach((cloudTask) => {
-            const localTask = localMap.get(cloudTask.id);
-            if (localTask) {
-              const cloudTime =
-                cloudTask.updatedAt ||
-                cloudTask.completedAt ||
-                cloudTask.createdAt ||
-                "";
-              const localTime =
-                localTask.updatedAt ||
-                localTask.completedAt ||
-                localTask.createdAt ||
-                "";
-              merged.push(cloudTime >= localTime ? cloudTask : localTask);
+          cloudMap.forEach((cloud) => {
+            const local = localMap.get(cloud.id);
+            if (local) {
+              const ct = cloud.updatedAt || cloud.createdAt || "";
+              const lt = local.updatedAt || local.createdAt || "";
+              merged.push(ct >= lt ? cloud : local);
             } else {
-              merged.push(cloudTask);
+              merged.push(cloud);
             }
           });
 
-          localMap.forEach((localTask) => {
-            if (!cloudMap.has(localTask.id)) {
-              merged.push(localTask);
-              saveTaskToFirebase(localTask, userId).catch(console.error);
+          localMap.forEach((local) => {
+            if (!cloudMap.has(local.id)) {
+              merged.push(local);
+              saveTaskToFirebase(local, userId, workspaceId).catch(console.error);
             }
           });
 
-          saveTasks(merged);
+          const all = [...otherTasks, ...merged];
+          saveTasks(all);
           return { tasks: merged, isSynced: true };
         });
       },
-      (error) => console.error("Sync error:", error)
+      (err) => console.error("Sync:", err)
     );
 
-    return () => unsubTasks();
+    return unsub;
   },
 }));
+
+// ============ usePersistTasks ============
 
 export function usePersistTasks() {
   useEffect(() => {
     const stored = loadTasks();
-    const reset = resetDailyTasks(stored);
+    const reset = resetDailyLike(stored);
     saveTasks(reset);
     useTaskStore.setState({ tasks: reset });
 
     const userId = getTelegramUserId();
-    useTaskStore.getState().loadUserData(userId);
-    const unsubscribe = useTaskStore.getState().startSync(userId);
+    const workspaceId =
+      localStorage.getItem("cortex-active-workspace") || PERSONAL_WORKSPACE_ID;
 
-    return () => unsubscribe();
+    migrateTasksIfNeeded(userId);
+    useTaskStore.getState().loadUserData(userId, workspaceId);
+    const unsub = useTaskStore.getState().startSync(userId, workspaceId);
+
+    return () => unsub();
   }, []);
 }
 
@@ -973,8 +1006,8 @@ export const RUSSIAN_HOLIDAYS: Record<string, string> = {
 };
 
 export function isWeekend(dateStr: string): boolean {
-  const date = new Date(dateStr + "T12:00:00");
-  return date.getDay() === 0 || date.getDay() === 6;
+  const d = new Date(dateStr + "T12:00:00");
+  return d.getDay() === 0 || d.getDay() === 6;
 }
 
 export function isHoliday(dateStr: string): boolean {
