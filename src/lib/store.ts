@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import { db } from "./firebase";
 import {
   collection,
-  addDoc,
   Timestamp,
   doc,
   getDoc,
@@ -18,14 +17,19 @@ import {
 
 export type TaskPriority = "low" | "medium" | "high";
 export type TaskStatus = "todo" | "in_progress" | "done";
-export type TaskRepeat = "none" | "daily";
+
+// ✅ Расширенный тип repeat
+export type TaskRepeat = "none" | "daily" | "weekdays" | "weekends" | string;
+// string покрывает "custom:mon,wed,fri"
+
 export type TaskType = "task" | "shopping";
 
 export type Task = {
   id: string;
   title: string;
   description?: string;
-  dueDate?: string;
+  dueDate?: string;          // ✅ Реальный дедлайн (без смещения)
+  reminderOffsetMinutes?: number; // ✅ Смещение напоминания в минутах
   priority: TaskPriority;
   status: TaskStatus;
   isAiCreated: boolean;
@@ -242,7 +246,18 @@ export async function getSubscriptionInfo(userId: string): Promise<{
   }
 }
 
-// ============ TASK HELPERS ============
+// ============ HELPERS ============
+
+// ✅ Нормализация repeat — сохраняем все варианты
+function normalizeRepeat(repeat: any): TaskRepeat {
+  if (!repeat || repeat === "none") return "none";
+  if (repeat === "daily") return "daily";
+  if (repeat === "weekdays") return "weekdays";
+  if (repeat === "weekends") return "weekends";
+  if (typeof repeat === "string" && repeat.startsWith("custom:"))
+    return repeat;
+  return "none";
+}
 
 function normalizeTask(task: any): Task {
   return {
@@ -250,6 +265,7 @@ function normalizeTask(task: any): Task {
     title: task.title || "",
     description: task.description || "",
     dueDate: task.dueDate || undefined,
+    reminderOffsetMinutes: task.reminderOffsetMinutes ?? 0,
     priority: task.priority || "medium",
     status: task.status || "todo",
     isAiCreated: Boolean(task.isAiCreated),
@@ -257,7 +273,7 @@ function normalizeTask(task: any): Task {
     completedAt: task.completedAt,
     updatedAt: task.updatedAt,
     notified: Boolean(task.notified),
-    repeat: task.repeat === "daily" ? "daily" : "none",
+    repeat: normalizeRepeat(task.repeat),
     category: task.category || "",
     type: task.type === "shopping" ? "shopping" : "task",
     items: task.items || [],
@@ -267,7 +283,13 @@ function normalizeTask(task: any): Task {
 function resetDailyTasks(tasks: Task[]): Task[] {
   const todayStr = new Date().toISOString().split("T")[0];
   return tasks.map((task) => {
-    if (task.repeat !== "daily" || task.status !== "done") return task;
+    if (task.status !== "done") return task;
+    const isDailyLike =
+      task.repeat === "daily" ||
+      task.repeat === "weekdays" ||
+      task.repeat === "weekends" ||
+      (typeof task.repeat === "string" && task.repeat.startsWith("custom:"));
+    if (!isDailyLike) return task;
     const completedDay = task.completedAt?.split("T")[0];
     if (completedDay && completedDay < todayStr) {
       return {
@@ -331,14 +353,96 @@ function saveCategoryEventsLocal(events: CategoryEvent[]) {
   } catch {}
 }
 
-// ============ FIREBASE TASK SYNC ============
+// ============ FIREBASE BOT TASKS — ЦЕНТРАЛИЗОВАННО ============
+
+// ✅ Вычисляем реальное время напоминания из dueDate + offset
+function computeReminderAt(dueDate: string, offsetMinutes: number): Date {
+  const due = new Date(dueDate);
+  return new Date(due.getTime() - offsetMinutes * 60 * 1000);
+}
+
+// ✅ UPSERT: создаём или обновляем запись в /tasks для бота
+async function upsertBotTask(task: Task, userId: string) {
+  if (userId === "unknown" || !task.dueDate) return;
+
+  try {
+    const dueDate = new Date(task.dueDate);
+    if (isNaN(dueDate.getTime())) return;
+
+    const offsetMinutes = task.reminderOffsetMinutes ?? 0;
+    const reminderAt = computeReminderAt(task.dueDate, offsetMinutes);
+
+    // Если время напоминания уже прошло — не создаём
+    if (reminderAt <= new Date()) return;
+
+    // Ищем существующую запись по taskId + userId
+    const existing = await getDocs(
+      query(
+        collection(db, "tasks"),
+        where("taskId", "==", task.id),
+        where("userId", "==", userId)
+      )
+    );
+
+    const botTaskData = {
+      userId,
+      taskId: task.id,
+      title: task.title,
+      description: task.description || "",
+      dueDate: task.dueDate,
+      priority: task.priority,
+      status: task.status,
+      createdAt: task.createdAt,
+      isSent: false,
+      reminderAt: Timestamp.fromDate(reminderAt),
+      repeat: task.repeat || "none",
+      type: task.type || "task",
+      reminderOffsetMinutes: offsetMinutes,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (!existing.empty) {
+      // ✅ Обновляем существующую запись (при смене дедлайна)
+      const existingDoc = existing.docs[0];
+      await setDoc(doc(db, "tasks", existingDoc.id), botTaskData);
+    } else {
+      // ✅ Создаём новую запись
+      const newRef = doc(collection(db, "tasks"));
+      await setDoc(newRef, botTaskData);
+    }
+
+    console.log(`✅ Bot task upserted: ${task.title} at ${reminderAt.toISOString()}`);
+  } catch (e: any) {
+    console.error("Bot task upsert error:", e.message);
+  }
+}
+
+// ✅ Удаляем все записи в /tasks для данной задачи
+async function deleteBotTask(taskId: string, userId: string) {
+  if (userId === "unknown") return;
+  try {
+    const existing = await getDocs(
+      query(
+        collection(db, "tasks"),
+        where("taskId", "==", taskId),
+        where("userId", "==", userId)
+      )
+    );
+    const batch = writeBatch(db);
+    existing.forEach((d) => batch.delete(d.ref));
+    if (!existing.empty) await batch.commit();
+  } catch (e: any) {
+    console.error("Delete bot task error:", e.message);
+  }
+}
 
 async function saveTaskToFirebase(task: Task, userId: string) {
   if (userId === "unknown") return;
   try {
+    const offsetMinutes = task.reminderOffsetMinutes ?? 0;
     let reminderAt = null;
     if (task.dueDate) {
-      const date = new Date(task.dueDate);
+      const date = computeReminderAt(task.dueDate, offsetMinutes);
       if (!isNaN(date.getTime())) reminderAt = Timestamp.fromDate(date);
     }
     await setDoc(doc(db, "users", userId, "tasks", task.id), {
@@ -353,50 +457,6 @@ async function saveTaskToFirebase(task: Task, userId: string) {
   }
 }
 
-// ✅ ИСПРАВЛЕНИЕ: сохраняем задачу в корневую /tasks для бота
-// Проверяем что такой taskId ещё не существует чтобы не дублировать
-async function saveTaskForBot(task: Task, userId: string) {
-  if (userId === "unknown" || !task.dueDate) return;
-  try {
-    const dueDate = new Date(task.dueDate);
-    if (isNaN(dueDate.getTime())) return;
-
-    // Не создаём напоминание для прошедших дат
-    if (dueDate <= new Date()) return;
-
-    // ✅ Проверяем — нет ли уже такого taskId в /tasks
-    const existing = await getDocs(
-      query(
-        collection(db, "tasks"),
-        where("taskId", "==", task.id),
-        where("userId", "==", userId)
-      )
-    );
-
-    // Если уже есть — не дублируем
-    if (!existing.empty) return;
-
-    await addDoc(collection(db, "tasks"), {
-      userId,
-      taskId: task.id,
-      title: task.title,
-      description: task.description || "",
-      dueDate: task.dueDate,
-      priority: task.priority,
-      status: task.status,
-      createdAt: task.createdAt,
-      isSent: false,
-      reminderAt: Timestamp.fromDate(dueDate),
-      repeat: task.repeat || "none",
-      type: task.type || "task",
-    });
-
-    console.log(`✅ Task saved for bot: ${task.title} at ${task.dueDate}`);
-  } catch (e: any) {
-    console.error("Bot task save error:", e.message);
-  }
-}
-
 async function deleteTaskFromFirebase(taskId: string, userId: string) {
   if (userId === "unknown") return;
   try {
@@ -404,21 +464,16 @@ async function deleteTaskFromFirebase(taskId: string, userId: string) {
   } catch {}
 }
 
-// ✅ НОВОЕ: синхронизируем все задачи с датой в корневую /tasks
-// Вызывается при загрузке данных — гарантирует что бот видит все задачи
+// ✅ Синхронизируем все задачи с датой в /tasks при загрузке
 async function syncAllTasksForBot(tasks: Task[], userId: string) {
   if (userId === "unknown") return;
-
   const now = new Date();
-
   for (const task of tasks) {
     if (!task.dueDate || task.status === "done") continue;
-
-    const dueDate = new Date(task.dueDate);
-    if (isNaN(dueDate.getTime()) || dueDate <= now) continue;
-
-    // saveTaskForBot внутри проверяет дубликаты
-    await saveTaskForBot(task, userId).catch(() => {});
+    const offsetMinutes = task.reminderOffsetMinutes ?? 0;
+    const reminderAt = computeReminderAt(task.dueDate, offsetMinutes);
+    if (reminderAt <= now) continue;
+    await upsertBotTask(task, userId).catch(() => {});
   }
 }
 
@@ -441,11 +496,12 @@ export const useTaskStore = create<TaskStore>((set) => ({
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       notified: false,
-      repeat: task.repeat || "none",
+      repeat: normalizeRepeat(task.repeat),
       category: task.category || "",
       type: task.type || "task",
       items: task.items || [],
       dueDate: task.dueDate || undefined,
+      reminderOffsetMinutes: task.reminderOffsetMinutes ?? 0,
     };
 
     set((state) => {
@@ -455,8 +511,9 @@ export const useTaskStore = create<TaskStore>((set) => ({
     });
 
     const userId = getTelegramUserId();
+    // ✅ Единая точка записи в Firebase
     await saveTaskToFirebase(newTask, userId).catch(console.error);
-    await saveTaskForBot(newTask, userId).catch(console.error);
+    await upsertBotTask(newTask, userId).catch(console.error);
 
     return newTask;
   },
@@ -477,9 +534,9 @@ export const useTaskStore = create<TaskStore>((set) => ({
       const updatedTask = updated.find((t) => t.id === taskId);
       if (updatedTask) {
         saveTaskToFirebase(updatedTask, userId).catch(console.error);
-        // ✅ Если обновилась дата — обновляем и в /tasks для бота
-        if (updates.dueDate) {
-          saveTaskForBot(updatedTask, userId).catch(console.error);
+        // ✅ Обновляем бот-запись при изменении дедлайна или offset
+        if (updates.dueDate !== undefined || updates.reminderOffsetMinutes !== undefined) {
+          upsertBotTask(updatedTask, userId).catch(console.error);
         }
       }
       return { tasks: updated };
@@ -491,7 +548,9 @@ export const useTaskStore = create<TaskStore>((set) => ({
       const updated = state.tasks.filter((t) => t.id !== taskId);
       saveTasks(updated);
       const userId = getTelegramUserId();
+      // ✅ Удаляем из обоих мест
       deleteTaskFromFirebase(taskId, userId).catch(console.error);
+      deleteBotTask(taskId, userId).catch(console.error);
       return { tasks: updated };
     });
   },
@@ -523,15 +582,12 @@ export const useTaskStore = create<TaskStore>((set) => ({
   addBirthday: async (birthday) => {
     const id = crypto.randomUUID();
     const newBirthday: Birthday = { ...birthday, id };
-    set((state) => ({
-      birthdays: [...state.birthdays, newBirthday],
-    }));
+    set((state) => ({ birthdays: [...state.birthdays, newBirthday] }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      setDoc(
-        doc(db, "users", userId, "birthdays", id),
-        newBirthday
-      ).catch(console.error);
+      setDoc(doc(db, "users", userId, "birthdays", id), newBirthday).catch(
+        console.error
+      );
   },
 
   deleteBirthday: async (id) => {
@@ -540,23 +596,18 @@ export const useTaskStore = create<TaskStore>((set) => ({
     }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(
-        doc(db, "users", userId, "birthdays", id)
-      ).catch(console.error);
+      deleteDoc(doc(db, "users", userId, "birthdays", id)).catch(console.error);
   },
 
   addVacation: async (vacation) => {
     const id = crypto.randomUUID();
     const newVacation: Vacation = { ...vacation, id };
-    set((state) => ({
-      vacations: [...state.vacations, newVacation],
-    }));
+    set((state) => ({ vacations: [...state.vacations, newVacation] }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      setDoc(
-        doc(db, "users", userId, "vacations", id),
-        newVacation
-      ).catch(console.error);
+      setDoc(doc(db, "users", userId, "vacations", id), newVacation).catch(
+        console.error
+      );
   },
 
   deleteVacation: async (id) => {
@@ -565,9 +616,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
     }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(
-        doc(db, "users", userId, "vacations", id)
-      ).catch(console.error);
+      deleteDoc(doc(db, "users", userId, "vacations", id)).catch(console.error);
   },
 
   addCategory: (category) => {
@@ -638,17 +687,13 @@ export const useTaskStore = create<TaskStore>((set) => ({
       yesterday.setDate(yesterday.getDate() - 1);
       const todayStr = new Date().toISOString().split("T")[0];
 
-      const [
-        birthdaysSnap,
-        vacationsSnap,
-        categoryEventsSnap,
-        tasksSnap,
-      ] = await Promise.all([
-        getDocs(collection(db, "users", userId, "birthdays")),
-        getDocs(collection(db, "users", userId, "vacations")),
-        getDocs(collection(db, "users", userId, "categoryEvents")),
-        getDocs(collection(db, "users", userId, "tasks")),
-      ]);
+      const [birthdaysSnap, vacationsSnap, categoryEventsSnap, tasksSnap] =
+        await Promise.all([
+          getDocs(collection(db, "users", userId, "birthdays")),
+          getDocs(collection(db, "users", userId, "vacations")),
+          getDocs(collection(db, "users", userId, "categoryEvents")),
+          getDocs(collection(db, "users", userId, "tasks")),
+        ]);
 
       const birthdays: Birthday[] = [];
       birthdaysSnap.forEach((d) => birthdays.push(d.data() as Birthday));
@@ -671,7 +716,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
         if (
           data.status === "done" &&
           data.completedAt &&
-          data.repeat !== "daily"
+          data.repeat === "none"
         ) {
           if (new Date(data.completedAt) < yesterday) {
             batch.delete(d.ref);
@@ -680,11 +725,14 @@ export const useTaskStore = create<TaskStore>((set) => ({
           }
         }
 
-        if (
-          data.repeat === "daily" &&
-          data.status === "done" &&
-          data.completedAt
-        ) {
+        const isDailyLike =
+          data.repeat === "daily" ||
+          data.repeat === "weekdays" ||
+          data.repeat === "weekends" ||
+          (typeof data.repeat === "string" &&
+            data.repeat.startsWith("custom:"));
+
+        if (isDailyLike && data.status === "done" && data.completedAt) {
           const completedDay = data.completedAt.split("T")[0];
           if (completedDay < todayStr) {
             const resetTask = normalizeTask({
@@ -739,13 +787,13 @@ export const useTaskStore = create<TaskStore>((set) => ({
           if (
             localTask.status === "done" &&
             localTask.completedAt &&
-            localTask.repeat !== "daily"
+            localTask.repeat === "none"
           ) {
             if (new Date(localTask.completedAt) < yesterday) return;
           }
           mergedTasks.push(localTask);
           saveTaskToFirebase(localTask, userId).catch(console.error);
-          saveTaskForBot(localTask, userId).catch(console.error);
+          upsertBotTask(localTask, userId).catch(console.error);
         }
       });
 
@@ -767,8 +815,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
         isDataLoaded: true,
       });
 
-      // ✅ ИСПРАВЛЕНИЕ: после загрузки синхронизируем ВСЕ будущие задачи
-      // в корневую /tasks чтобы бот точно их видел
+      // Синхронизируем бот-задачи через 2 сек после загрузки
       setTimeout(() => {
         syncAllTasksForBot(mergedTasks, userId).catch(console.error);
       }, 2000);
@@ -799,16 +846,19 @@ export const useTaskStore = create<TaskStore>((set) => ({
           if (
             data.status === "done" &&
             data.completedAt &&
-            data.repeat !== "daily"
+            data.repeat === "none"
           ) {
             if (new Date(data.completedAt) < yesterday) return;
           }
 
-          if (
-            data.repeat === "daily" &&
-            data.status === "done" &&
-            data.completedAt
-          ) {
+          const isDailyLike =
+            data.repeat === "daily" ||
+            data.repeat === "weekdays" ||
+            data.repeat === "weekends" ||
+            (typeof data.repeat === "string" &&
+              data.repeat.startsWith("custom:"));
+
+          if (isDailyLike && data.status === "done" && data.completedAt) {
             const completedDay = data.completedAt.split("T")[0];
             if (completedDay < todayStr) {
               cloudMap.set(
