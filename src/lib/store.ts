@@ -12,6 +12,8 @@ import {
   getDocs,
   onSnapshot,
   writeBatch,
+  query,
+  where,
 } from "firebase/firestore";
 
 export type TaskPriority = "low" | "medium" | "high";
@@ -69,7 +71,6 @@ export type CategoryEvent = {
   color?: string;
 };
 
-// ✅ Тип сообщения чата
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -109,20 +110,20 @@ type TaskStore = {
   startSync: (userId: string) => () => void;
 };
 
+// ============ STORAGE KEYS ============
+
 const STORAGE_KEY = "cortex-tasks";
 const CHAT_STORAGE_KEY = "cortex-ai-chat";
 const COACH_CHAT_STORAGE_KEY = "cortex-coach-chat";
 const CATEGORIES_KEY = "cortex-categories";
 const CATEGORY_EVENTS_KEY = "cortex-category-events";
 
-// ============ CHAT HISTORY (localStorage + Firebase) ============
+// ============ CHAT HISTORY ============
 
 export function saveChatHistory(messages: ChatMessage[]) {
   try {
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
   } catch {}
-
-  // ✅ Сохраняем в Firebase асинхронно
   const userId = getTelegramUserId();
   if (userId !== "unknown") {
     saveChatToFirebase(userId, "ai-assistant", messages).catch(() => {});
@@ -137,12 +138,10 @@ export function loadChatHistory(): ChatMessage[] {
   return [];
 }
 
-// ✅ История чата коуча (WeeklyGoalsPage)
 export function saveCoachChatHistory(messages: ChatMessage[]) {
   try {
     localStorage.setItem(COACH_CHAT_STORAGE_KEY, JSON.stringify(messages));
   } catch {}
-
   const userId = getTelegramUserId();
   if (userId !== "unknown") {
     saveChatToFirebase(userId, "ai-coach", messages).catch(() => {});
@@ -157,7 +156,6 @@ export function loadCoachChatHistory(): ChatMessage[] {
   return [];
 }
 
-// ✅ Сохранение истории чата в Firebase
 async function saveChatToFirebase(
   userId: string,
   chatId: string,
@@ -165,7 +163,6 @@ async function saveChatToFirebase(
 ) {
   if (userId === "unknown") return;
   try {
-    // Сохраняем последние 50 сообщений
     const trimmed = messages.slice(-50);
     await setDoc(doc(db, "users", userId, "chats", chatId), {
       messages: trimmed,
@@ -177,7 +174,6 @@ async function saveChatToFirebase(
   }
 }
 
-// ✅ Загрузка истории чата из Firebase
 export async function loadChatFromFirebase(
   userId: string,
   chatId: string
@@ -201,7 +197,8 @@ export function getTelegramUserId(): string {
   try {
     const tg = (window as any).Telegram?.WebApp;
     if (!tg) return "unknown";
-    if (tg.initDataUnsafe?.user?.id) return String(tg.initDataUnsafe.user.id);
+    if (tg.initDataUnsafe?.user?.id)
+      return String(tg.initDataUnsafe.user.id);
   } catch {}
   return "unknown";
 }
@@ -334,6 +331,8 @@ function saveCategoryEventsLocal(events: CategoryEvent[]) {
   } catch {}
 }
 
+// ============ FIREBASE TASK SYNC ============
+
 async function saveTaskToFirebase(task: Task, userId: string) {
   if (userId === "unknown") return;
   try {
@@ -354,11 +353,28 @@ async function saveTaskToFirebase(task: Task, userId: string) {
   }
 }
 
+// ✅ ИСПРАВЛЕНИЕ: сохраняем задачу в корневую /tasks для бота
+// Проверяем что такой taskId ещё не существует чтобы не дублировать
 async function saveTaskForBot(task: Task, userId: string) {
   if (userId === "unknown" || !task.dueDate) return;
   try {
     const dueDate = new Date(task.dueDate);
     if (isNaN(dueDate.getTime())) return;
+
+    // Не создаём напоминание для прошедших дат
+    if (dueDate <= new Date()) return;
+
+    // ✅ Проверяем — нет ли уже такого taskId в /tasks
+    const existing = await getDocs(
+      query(
+        collection(db, "tasks"),
+        where("taskId", "==", task.id),
+        where("userId", "==", userId)
+      )
+    );
+
+    // Если уже есть — не дублируем
+    if (!existing.empty) return;
 
     await addDoc(collection(db, "tasks"), {
       userId,
@@ -374,6 +390,8 @@ async function saveTaskForBot(task: Task, userId: string) {
       repeat: task.repeat || "none",
       type: task.type || "task",
     });
+
+    console.log(`✅ Task saved for bot: ${task.title} at ${task.dueDate}`);
   } catch (e: any) {
     console.error("Bot task save error:", e.message);
   }
@@ -384,6 +402,24 @@ async function deleteTaskFromFirebase(taskId: string, userId: string) {
   try {
     await deleteDoc(doc(db, "users", userId, "tasks", taskId));
   } catch {}
+}
+
+// ✅ НОВОЕ: синхронизируем все задачи с датой в корневую /tasks
+// Вызывается при загрузке данных — гарантирует что бот видит все задачи
+async function syncAllTasksForBot(tasks: Task[], userId: string) {
+  if (userId === "unknown") return;
+
+  const now = new Date();
+
+  for (const task of tasks) {
+    if (!task.dueDate || task.status === "done") continue;
+
+    const dueDate = new Date(task.dueDate);
+    if (isNaN(dueDate.getTime()) || dueDate <= now) continue;
+
+    // saveTaskForBot внутри проверяет дубликаты
+    await saveTaskForBot(task, userId).catch(() => {});
+  }
 }
 
 // ============ STORE ============
@@ -419,8 +455,8 @@ export const useTaskStore = create<TaskStore>((set) => ({
     });
 
     const userId = getTelegramUserId();
-    saveTaskToFirebase(newTask, userId).catch(console.error);
-    saveTaskForBot(newTask, userId).catch(console.error);
+    await saveTaskToFirebase(newTask, userId).catch(console.error);
+    await saveTaskForBot(newTask, userId).catch(console.error);
 
     return newTask;
   },
@@ -429,14 +465,23 @@ export const useTaskStore = create<TaskStore>((set) => ({
     set((state) => {
       const updated = state.tasks.map((t) =>
         t.id === taskId
-          ? normalizeTask({ ...t, ...updates, updatedAt: new Date().toISOString() })
+          ? normalizeTask({
+              ...t,
+              ...updates,
+              updatedAt: new Date().toISOString(),
+            })
           : t
       );
       saveTasks(updated);
       const userId = getTelegramUserId();
       const updatedTask = updated.find((t) => t.id === taskId);
-      if (updatedTask)
+      if (updatedTask) {
         saveTaskToFirebase(updatedTask, userId).catch(console.error);
+        // ✅ Если обновилась дата — обновляем и в /tasks для бота
+        if (updates.dueDate) {
+          saveTaskForBot(updatedTask, userId).catch(console.error);
+        }
+      }
       return { tasks: updated };
     });
   },
@@ -478,12 +523,15 @@ export const useTaskStore = create<TaskStore>((set) => ({
   addBirthday: async (birthday) => {
     const id = crypto.randomUUID();
     const newBirthday: Birthday = { ...birthday, id };
-    set((state) => ({ birthdays: [...state.birthdays, newBirthday] }));
+    set((state) => ({
+      birthdays: [...state.birthdays, newBirthday],
+    }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      setDoc(doc(db, "users", userId, "birthdays", id), newBirthday).catch(
-        console.error
-      );
+      setDoc(
+        doc(db, "users", userId, "birthdays", id),
+        newBirthday
+      ).catch(console.error);
   },
 
   deleteBirthday: async (id) => {
@@ -492,13 +540,17 @@ export const useTaskStore = create<TaskStore>((set) => ({
     }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(doc(db, "users", userId, "birthdays", id)).catch(console.error);
+      deleteDoc(
+        doc(db, "users", userId, "birthdays", id)
+      ).catch(console.error);
   },
 
   addVacation: async (vacation) => {
     const id = crypto.randomUUID();
     const newVacation: Vacation = { ...vacation, id };
-    set((state) => ({ vacations: [...state.vacations, newVacation] }));
+    set((state) => ({
+      vacations: [...state.vacations, newVacation],
+    }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
       setDoc(
@@ -513,7 +565,9 @@ export const useTaskStore = create<TaskStore>((set) => ({
     }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(doc(db, "users", userId, "vacations", id)).catch(console.error);
+      deleteDoc(
+        doc(db, "users", userId, "vacations", id)
+      ).catch(console.error);
   },
 
   addCategory: (category) => {
@@ -712,6 +766,12 @@ export const useTaskStore = create<TaskStore>((set) => ({
         tasks: mergedTasks,
         isDataLoaded: true,
       });
+
+      // ✅ ИСПРАВЛЕНИЕ: после загрузки синхронизируем ВСЕ будущие задачи
+      // в корневую /tasks чтобы бот точно их видел
+      setTimeout(() => {
+        syncAllTasksForBot(mergedTasks, userId).catch(console.error);
+      }, 2000);
     } catch (e) {
       console.error("Load user data error:", e);
       set({ isDataLoaded: true });
