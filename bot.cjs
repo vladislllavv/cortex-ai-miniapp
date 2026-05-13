@@ -39,7 +39,11 @@ const sentMotivations = new Set();
 const YOOKASSA_PROVIDER_TOKEN =
   process.env.YOOKASSA_PROVIDER_TOKEN || "381764678:TEST:177451";
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const WEBAPP_URL = process.env.WEBAPP_URL || "https://t.me/aiplannerrubot/app";
+
+// ✅ WEBAPP_URL должен быть прямым HTTPS URL приложения, например:
+// https://your-app.amvera.io или https://your-domain.com
+// НЕ t.me ссылка
+const WEBAPP_URL = process.env.WEBAPP_URL || "";
 
 const SUBSCRIPTION_PLANS = {
   yk_month_1:  { label: "1 месяц",    days: 30,  amountKopecks: 9900,  amountRub: "99.00",  emoji: "📅", type: "yk" },
@@ -67,10 +71,26 @@ bot.setMyCommands([
 
 console.log("Бот запущен ✅");
 console.log("GROQ_API_KEY:", GROQ_API_KEY ? "задан ✅" : "не задан ❌");
-console.log("WEBAPP_URL:", WEBAPP_URL);
+console.log("WEBAPP_URL:", WEBAPP_URL || "НЕ ЗАДАН ⚠️");
 
 function isAdmin(u) {
   return ADMINS.includes(String(u));
+}
+
+// ✅ Безопасная функция создания inline кнопки для открытия приложения
+// Если WEBAPP_URL задан — используем web_app, иначе просто текст
+function getOpenAppButton() {
+  if (WEBAPP_URL && WEBAPP_URL.startsWith("https://") && !WEBAPP_URL.includes("t.me")) {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🚀 Открыть CortexAI", web_app: { url: WEBAPP_URL } }],
+        ],
+      },
+    };
+  }
+  // Если URL не задан или некорректный — не добавляем кнопку
+  return {};
 }
 
 // ============ ПОДПИСКА ============
@@ -211,27 +231,24 @@ async function generateMotivation(userId, mode, tasks) {
       : "задач нет";
 
   const modeInstructions = {
-    soft: "Ты добрый поддерживающий друг. Пиши тепло, мягко, с заботой. Никакого давления.",
+    soft:   "Ты добрый поддерживающий друг. Пиши тепло, мягко, с заботой. Никакого давления.",
     normal: "Ты энергичный мотивационный коуч. Пиши позитивно, конкретно, с энтузиазмом.",
-    hard: "Ты требовательный тренер. Пиши прямо, честно, требовательно. БЕЗ нецензурных слов.",
+    hard:   "Ты требовательный тренер. Пиши прямо, честно, требовательно. БЕЗ нецензурных слов.",
   };
 
   const instruction = modeInstructions[mode] || modeInstructions.normal;
 
-  const prompt = `${instruction}
-
-Сейчас ${timeOfDay}, ${now.toLocaleDateString("ru-RU", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  })}.
-
-Задачи пользователя:
-${tasksList}
-
-Напиши короткое мотивационное сообщение (2-3 предложения) с учётом задач и времени суток.
-НЕ начинай с "Конечно!", "Вот:", "Привет!" — сразу пиши сообщение.
-Используй 1-2 эмодзи. Только на русском языке.`;
+  const prompt =
+    `${instruction}\n\n` +
+    `Сейчас ${timeOfDay}, ${now.toLocaleDateString("ru-RU", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    })}.\n\n` +
+    `Задачи пользователя:\n${tasksList}\n\n` +
+    `Напиши короткое мотивационное сообщение (2-3 предложения) с учётом задач и времени суток.\n` +
+    `НЕ начинай с "Конечно!", "Вот:", "Привет!" — сразу пиши сообщение.\n` +
+    `Используй 1-2 эмодзи. Только на русском языке.`;
 
   try {
     const result = await askGroq(prompt, 200);
@@ -249,7 +266,6 @@ async function sendMotivationNotifications() {
     const todayStr = now.toISOString().split("T")[0];
 
     let settingsSnap;
-    let usedCollectionGroup = true;
 
     try {
       settingsSnap = await getDocs(
@@ -260,7 +276,6 @@ async function sendMotivationNotifications() {
       );
     } catch (e) {
       console.log("collectionGroup не сработал, используем fallback");
-      usedCollectionGroup = false;
       await sendMotivationFallback(currentHour, todayStr);
       return;
     }
@@ -288,7 +303,6 @@ async function sendMotivationNotifications() {
       console.log(`💪 Мотивация обработана для ${processed} пользователей`);
     }
 
-    // Очистка старых ключей
     if (sentMotivations.size > 5000) {
       const toDelete = [];
       sentMotivations.forEach((key) => {
@@ -313,12 +327,7 @@ async function sendMotivationFallback(currentHour, todayStr) {
         if (!settingSnap.exists()) continue;
         const settings = settingSnap.data();
         if (!settings.enabled || settings.mode === "off") continue;
-        await processMotivationForUser(
-          userId,
-          settings,
-          currentHour,
-          todayStr
-        );
+        await processMotivationForUser(userId, settings, currentHour, todayStr);
       } catch {}
     }
   } catch (err) {
@@ -326,16 +335,10 @@ async function sendMotivationFallback(currentHour, todayStr) {
   }
 }
 
-async function processMotivationForUser(
-  userId,
-  settings,
-  currentHour,
-  todayStr
-) {
+async function processMotivationForUser(userId, settings, currentHour, todayStr) {
   try {
     const timesPerDay = settings.timesPerDay || 3;
-    const schedule =
-      MOTIVATION_SCHEDULES[timesPerDay] || MOTIVATION_SCHEDULES[3];
+    const schedule = MOTIVATION_SCHEDULES[timesPerDay] || MOTIVATION_SCHEDULES[3];
 
     if (!schedule.includes(currentHour)) return;
 
@@ -343,49 +346,31 @@ async function processMotivationForUser(
     if (sentMotivations.has(motivationKey)) return;
     sentMotivations.add(motivationKey);
 
-    console.log(
-      `💪 Отправляю мотивацию: ${userId}, режим: ${settings.mode}, час: ${currentHour}`
-    );
+    console.log(`💪 Отправляю мотивацию: ${userId}, режим: ${settings.mode}, час: ${currentHour}`);
 
-    const tasksSnap = await getDocs(
-      collection(db, "users", userId, "tasks")
-    );
+    const tasksSnap = await getDocs(collection(db, "users", userId, "tasks"));
     const activeTasks = [];
     tasksSnap.forEach((d) => {
       const data = d.data();
       if (data.status !== "done" && data.title) activeTasks.push(data);
     });
 
-    let motivation = await generateMotivation(
-      userId,
-      settings.mode,
-      activeTasks
-    );
+    let motivation = await generateMotivation(userId, settings.mode, activeTasks);
 
     if (!motivation) {
-      const fallbackList =
-        FALLBACK_MOTIVATIONS[settings.mode] || FALLBACK_MOTIVATIONS.normal;
-      motivation =
-        fallbackList[Math.floor(Math.random() * fallbackList.length)];
+      const fallbackList = FALLBACK_MOTIVATIONS[settings.mode] || FALLBACK_MOTIVATIONS.normal;
+      motivation = fallbackList[Math.floor(Math.random() * fallbackList.length)];
     }
 
     if (!motivation) return;
 
-    await bot.sendMessage(userId, `💪 Мотивация\n\n${motivation}`, {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🚀 Открыть CortexAI", web_app: { url: WEBAPP_URL } }],
-        ],
-      },
-    });
+    // ✅ Отправляем БЕЗ web_app кнопки — только текст мотивации
+    await bot.sendMessage(userId, `💪 Мотивация\n\n${motivation}`);
 
     console.log(`✅ Мотивация отправлена: ${userId}`);
   } catch (err) {
-    console.log(
-      `❌ Ошибка мотивации для ${userId}: ${err.message}`
-    );
+    console.log(`❌ Ошибка мотивации для ${userId}: ${err.message}`);
 
-    // ✅ Если бот заблокирован — отключаем автоматически
     if (
       err.response?.statusCode === 403 ||
       err.message?.includes("403") ||
@@ -398,9 +383,7 @@ async function processMotivationForUser(
           { enabled: false },
           { merge: true }
         );
-        console.log(
-          `⚠️ Мотивация отключена для ${userId} (бот заблокирован)`
-        );
+        console.log(`⚠️ Мотивация отключена для ${userId} (бот заблокирован)`);
       } catch {}
     }
   }
@@ -413,7 +396,6 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
   const userId = String(chatId);
   const param = ((match[1] || "").trim()).replace(/^\//, "");
 
-  // ✅ Всегда сохраняем пользователя при /start
   try {
     await setDoc(
       doc(db, "users", userId),
@@ -434,9 +416,7 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
   }
 
   if (isAdmin(userId)) {
-    try {
-      await grantSubscription(userId, 3650, true);
-    } catch {}
+    try { await grantSubscription(userId, 3650, true); } catch {}
   }
 
   if (param === "subscribe") {
@@ -448,6 +428,7 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
     return;
   }
 
+  // ✅ Приветствие без web_app кнопки (она вызывает ошибку если URL неверный)
   bot.sendMessage(
     chatId,
     `Привет, ${msg.from.first_name || "друг"}! 👋\n\n` +
@@ -455,14 +436,7 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
     `🔔 Напоминания о задачах\n` +
     `💪 Мотивационные сообщения\n` +
     `⭐ Уведомления о подписке\n\n` +
-    `Открой приложение и настрой мотивацию в разделе AI (⚙️)!`,
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🚀 Открыть CortexAI", web_app: { url: WEBAPP_URL } }],
-        ],
-      },
-    }
+    `Открой приложение и настрой мотивацию в разделе AI (⚙️)!`
   );
 });
 
@@ -507,26 +481,18 @@ bot.onText(/\/test_motivation/, async (msg) => {
       `Генерирую тестовую мотивацию...`
     );
 
-    const tasksSnap = await getDocs(
-      collection(db, "users", userId, "tasks")
-    );
+    const tasksSnap = await getDocs(collection(db, "users", userId, "tasks"));
     const activeTasks = [];
     tasksSnap.forEach((d) => {
       const data = d.data();
       if (data.status !== "done") activeTasks.push(data);
     });
 
-    let motivation = await generateMotivation(
-      userId,
-      settings.mode || "normal",
-      activeTasks
-    );
+    let motivation = await generateMotivation(userId, settings.mode || "normal", activeTasks);
 
     if (!motivation) {
-      const fallbackList =
-        FALLBACK_MOTIVATIONS[settings.mode] || FALLBACK_MOTIVATIONS.normal;
-      motivation =
-        fallbackList[Math.floor(Math.random() * fallbackList.length)];
+      const fallbackList = FALLBACK_MOTIVATIONS[settings.mode] || FALLBACK_MOTIVATIONS.normal;
+      motivation = fallbackList[Math.floor(Math.random() * fallbackList.length)];
     }
 
     await bot.sendMessage(chatId, `💪 Мотивация (тест)\n\n${motivation}`);
@@ -570,10 +536,7 @@ bot.onText(/\/revoke (.+)/, async (msg, match) => {
     });
     bot.sendMessage(msg.chat.id, `✅ Подписка отключена у ${targetId}`);
     try {
-      bot.sendMessage(
-        targetId,
-        "❌ Подписка CortexAI отключена.\n\nНапиши /subscribe."
-      );
+      bot.sendMessage(targetId, "❌ Подписка CortexAI отключена.\n\nНапиши /subscribe.");
     } catch {}
   } catch (err) {
     bot.sendMessage(msg.chat.id, `❌ Ошибка: ${err.message}`);
@@ -595,9 +558,7 @@ bot.onText(/\/subscribers/, async (msg) => {
       const sub = d.data();
       if (!sub.expiresAt) return;
       const expiresAt = sub.expiresAt.toDate();
-      const daysLeft = Math.ceil(
-        (expiresAt - now) / (1000 * 60 * 60 * 24)
-      );
+      const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
       if (sub.isActive && daysLeft > 0) {
         activeList.push({
           userId: sub.userId,
@@ -648,9 +609,7 @@ bot.onText(/\/stats/, async (msg) => {
       if (
         sub.isActive &&
         sub.expiresAt &&
-        Math.ceil(
-          (sub.expiresAt.toDate() - now) / (1000 * 60 * 60 * 24)
-        ) > 0
+        Math.ceil((sub.expiresAt.toDate() - now) / (1000 * 60 * 60 * 24)) > 0
       ) {
         activeSubs++;
       }
@@ -659,14 +618,10 @@ bot.onText(/\/stats/, async (msg) => {
     let motivationEnabled = 0;
     try {
       const motSnap = await getDocs(
-        query(
-          collectionGroup(db, "settings"),
-          where("enabled", "==", true)
-        )
+        query(collectionGroup(db, "settings"), where("enabled", "==", true))
       );
       motSnap.forEach((d) => {
-        if (d.id === "motivation" && d.data().mode !== "off")
-          motivationEnabled++;
+        if (d.id === "motivation" && d.data().mode !== "off") motivationEnabled++;
       });
     } catch {}
 
@@ -676,7 +631,6 @@ bot.onText(/\/stats/, async (msg) => {
       totalUsers = usersSnap.size;
     } catch {}
 
-    // ✅ Считаем pending напоминания
     let pendingReminders = 0;
     try {
       const remSnap = await getDocs(
@@ -747,9 +701,9 @@ bot.on("callback_query", async (callbackQuery) => {
     await bot.sendMessage(chatId, "⭐ Оплата Telegram Stars — выбери тариф:", {
       reply_markup: {
         inline_keyboard: [
-          [{ text: "📅 1 месяц — 73 ⭐",         callback_data: "buy_stars_month_1"  }],
-          [{ text: "🗓 3 месяца — 289 ⭐",        callback_data: "buy_stars_month_3"  }],
-          [{ text: "🏆 12 месяцев — 430 ⭐ 🔥",   callback_data: "buy_stars_month_12" }],
+          [{ text: "📅 1 месяц — 73 ⭐",        callback_data: "buy_stars_month_1"  }],
+          [{ text: "🗓 3 месяца — 289 ⭐",       callback_data: "buy_stars_month_3"  }],
+          [{ text: "🏆 12 месяцев — 430 ⭐ 🔥",  callback_data: "buy_stars_month_12" }],
         ],
       },
     });
@@ -832,9 +786,7 @@ bot.on("successful_payment", async (msg) => {
   const payment = msg.successful_payment;
   const payload = payment?.invoice_payload || "";
 
-  console.log(
-    `💰 Оплата: ${userId} — ${payload} — ${payment?.currency} — ${payment?.total_amount}`
-  );
+  console.log(`💰 Оплата: ${userId} — ${payload} — ${payment?.currency} — ${payment?.total_amount}`);
 
   try {
     let days = 30;
@@ -858,8 +810,10 @@ bot.on("successful_payment", async (msg) => {
       `💰 Сумма: ${amountStr}\n` +
       `📅 Тариф: ${planLabel}\n\n` +
       `🚀 Подписка CortexAI активирована!\n` +
-      `• Безлимитные задачи\n• AI без лимитов\n` +
-      `• Мотивационные уведомления\n• Цели на неделю\n\n` +
+      `• Безлимитные задачи\n` +
+      `• AI без лимитов\n` +
+      `• Мотивационные уведомления\n` +
+      `• Цели на неделю\n\n` +
       `${isStars ? "" : "Чек придёт на почту."}`
     );
 
@@ -888,9 +842,7 @@ function startAiListener() {
   onSnapshot(
     q,
     async (snapshot) => {
-      const newDocs = snapshot
-        .docChanges()
-        .filter((c) => c.type === "added");
+      const newDocs = snapshot.docChanges().filter((c) => c.type === "added");
       if (newDocs.length === 0) return;
 
       for (const change of newDocs) {
@@ -959,8 +911,7 @@ function startAiListener() {
           );
 
           const groqData = await groqResponse.json();
-          const aiResponse =
-            groqData.choices?.[0]?.message?.content || "Нет ответа";
+          const aiResponse = groqData.choices?.[0]?.message?.content || "Нет ответа";
 
           let taskCreated = null;
           const taskJsonMatch = aiResponse.match(/TASK_JSON:(\{[^}]+\})/);
@@ -994,10 +945,7 @@ function startAiListener() {
                     : null,
                 };
                 const saves = [
-                  setDoc(
-                    doc(db, "users", userId, "tasks", taskId),
-                    taskForSync
-                  ),
+                  setDoc(doc(db, "users", userId, "tasks", taskId), taskForSync),
                 ];
                 if (taskData.dueDate) {
                   const dueDate = new Date(taskData.dueDate);
@@ -1080,8 +1028,6 @@ function startAiListener() {
 async function checkReminders() {
   try {
     const now = new Date();
-
-    // ✅ Берём задачи у которых reminderAt <= сейчас и isSent = false
     const q = query(
       collection(db, "tasks"),
       where("isSent", "==", false),
@@ -1091,25 +1037,20 @@ async function checkReminders() {
 
     if (snapshot.empty) return;
 
-    console.log(`🔔 Найдено ${snapshot.size} напоминаний для отправки`);
+    console.log(`🔔 Найдено ${snapshot.size} напоминаний`);
 
     for (const documentSnapshot of snapshot.docs) {
       const taskId = documentSnapshot.id;
-
-      // Защита от повторной отправки в рамках одного запуска
       if (sentNotifications.has(taskId)) continue;
       sentNotifications.add(taskId);
 
       const task = documentSnapshot.data();
 
       try {
-        // Сразу помечаем как отправленное чтобы не задвоить
         await updateDoc(doc(db, "tasks", taskId), { isSent: true });
 
-        // Пропускаем выполненные задачи
         if (task.status === "done") continue;
 
-        // Также обновляем статус в users/{userId}/tasks
         if (task.userId && task.taskId) {
           updateDoc(
             doc(db, "users", task.userId, "tasks", task.taskId),
@@ -1117,6 +1058,7 @@ async function checkReminders() {
           ).catch(() => {});
         }
 
+        // ✅ Напоминание БЕЗ web_app кнопки
         await bot.sendMessage(
           task.userId,
           `🔔 Напоминание!\n\n` +
@@ -1124,49 +1066,21 @@ async function checkReminders() {
           `${task.description ? `\n${task.description}` : ""}` +
           `${
             task.repeat && task.repeat !== "none"
-              ? `\n\n🔁 ${
-                  task.repeat === "daily"
-                    ? "Ежедневная задача"
-                    : "Повторяющаяся задача"
-                }`
+              ? `\n\n🔁 ${task.repeat === "daily" ? "Ежедневная задача" : "Повторяющаяся задача"}`
               : ""
-          }`,
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: "✅ Открыть задачи",
-                    web_app: { url: WEBAPP_URL },
-                  },
-                ],
-              ],
-            },
-          }
+          }`
         );
 
-        // ✅ Создаём следующую daily задачу
         if (task.repeat === "daily" && task.status !== "done") {
           await createNextDailyTask(task);
         }
 
-        console.log(`✅ Напоминание: ${task.userId} — ${task.title}`);
+        console.log(`✅ Напоминание отправлено: ${task.userId} — ${task.title}`);
       } catch (err) {
         console.log(`❌ Ошибка напоминания: ${err.message}`);
-
-        // Если бот заблокирован — не retry
-        if (
-          err.response?.statusCode === 403 ||
-          err.message?.includes("blocked")
-        ) {
-          console.log(
-            `⚠️ Пользователь ${task.userId} заблокировал бота`
-          );
-        }
       }
     }
 
-    // Очищаем кэш раз в 1000 записей
     if (sentNotifications.size > 1000) sentNotifications.clear();
   } catch (err) {
     console.log(`Ошибка напоминаний: ${err.message}`);
@@ -1179,7 +1093,6 @@ async function createNextDailyTask(task) {
     nextDate.setDate(nextDate.getDate() + 1);
     const nextDateStr = nextDate.toISOString().split("T")[0];
 
-    // Проверяем что на следующий день уже нет такой задачи
     const existing = await getDocs(
       query(
         collection(db, "tasks"),
@@ -1210,7 +1123,7 @@ async function createNextDailyTask(task) {
       repeat: "daily",
     });
 
-    console.log(`🔁 Daily задача создана на ${nextDateStr}: ${task.title}`);
+    console.log(`🔁 Daily задача на ${nextDateStr}: ${task.title}`);
   } catch (err) {
     console.log(`Ошибка daily: ${err.message}`);
   }
@@ -1224,9 +1137,7 @@ async function checkSubscriptions() {
       const sub = subDoc.data();
       if (!sub.isActive || !sub.expiresAt) continue;
       const expiresAt = sub.expiresAt.toDate();
-      const daysLeft = Math.ceil(
-        (expiresAt - now) / (1000 * 60 * 60 * 24)
-      );
+      const daysLeft = Math.ceil((expiresAt - now) / (1000 * 60 * 60 * 24));
 
       if (daysLeft === 3 && !sub.notified3days) {
         try {
@@ -1234,9 +1145,7 @@ async function checkSubscriptions() {
             sub.userId,
             "⚠️ Подписка заканчивается через 3 дня!\n\nНапиши /subscribe для продления 🚀"
           );
-          await updateDoc(doc(db, "subscriptions", subDoc.id), {
-            notified3days: true,
-          });
+          await updateDoc(doc(db, "subscriptions", subDoc.id), { notified3days: true });
         } catch {}
       }
       if (daysLeft === 1 && !sub.notified1day) {
@@ -1245,20 +1154,13 @@ async function checkSubscriptions() {
             sub.userId,
             "🚨 Подписка заканчивается ЗАВТРА!\n\nНапиши /subscribe ⚡"
           );
-          await updateDoc(doc(db, "subscriptions", subDoc.id), {
-            notified1day: true,
-          });
+          await updateDoc(doc(db, "subscriptions", subDoc.id), { notified1day: true });
         } catch {}
       }
       if (daysLeft <= 0 && sub.isActive) {
         try {
-          await updateDoc(doc(db, "subscriptions", subDoc.id), {
-            isActive: false,
-          });
-          await bot.sendMessage(
-            sub.userId,
-            "❌ Подписка истекла.\n\nНапиши /subscribe."
-          );
+          await updateDoc(doc(db, "subscriptions", subDoc.id), { isActive: false });
+          await bot.sendMessage(sub.userId, "❌ Подписка истекла.\n\nНапиши /subscribe.");
         } catch {}
       }
     }
@@ -1285,18 +1187,12 @@ async function checkBirthdays() {
         const bd = bdDoc.data();
         if (bd.date === tomorrowStr) {
           try {
-            await bot.sendMessage(
-              userId,
-              `🎂 Завтра день рождения у ${bd.name}! 🎉`
-            );
+            await bot.sendMessage(userId, `🎂 Завтра день рождения у ${bd.name}! 🎉`);
           } catch {}
         }
         if (bd.date === todayStr) {
           try {
-            await bot.sendMessage(
-              userId,
-              `🎉 Сегодня день рождения у ${bd.name}! 🎂🥳`
-            );
+            await bot.sendMessage(userId, `🎉 Сегодня день рождения у ${bd.name}! 🎂🥳`);
           } catch {}
         }
       }
@@ -1326,16 +1222,13 @@ async function cleanupOldDoneTasks() {
             new Date(data.completedAt) < yesterday
           ) {
             try {
-              await deleteDoc(
-                doc(db, "users", userId, "tasks", taskDoc.id)
-              );
+              await deleteDoc(doc(db, "users", userId, "tasks", taskDoc.id));
             } catch {}
           }
         }
       } catch {}
     }
 
-    // Чистим старые ai_requests
     try {
       const twoDaysAgo = new Date();
       twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
@@ -1344,10 +1237,7 @@ async function cleanupOldDoneTasks() {
       );
       for (const d of aiSnap.docs) {
         const data = d.data();
-        if (
-          data.completedAt &&
-          new Date(data.completedAt) < twoDaysAgo
-        ) {
+        if (data.completedAt && new Date(data.completedAt) < twoDaysAgo) {
           try {
             await Promise.all([
               deleteDoc(doc(db, "ai_requests", d.id)),
@@ -1358,7 +1248,6 @@ async function cleanupOldDoneTasks() {
       }
     } catch {}
 
-    // ✅ Чистим старые отправленные напоминания из /tasks
     try {
       const threeDaysAgo = new Date();
       threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
@@ -1367,10 +1256,7 @@ async function cleanupOldDoneTasks() {
       );
       for (const d of sentTasksSnap.docs) {
         const data = d.data();
-        if (
-          data.createdAt &&
-          new Date(data.createdAt) < threeDaysAgo
-        ) {
+        if (data.createdAt && new Date(data.createdAt) < threeDaysAgo) {
           try {
             await deleteDoc(doc(db, "tasks", d.id));
           } catch {}
@@ -1388,22 +1274,13 @@ async function cleanupOldDoneTasks() {
 
 startAiListener();
 
-// Напоминания — каждую минуту
 setInterval(checkReminders, 60 * 1000);
-
-// Подписки — каждый час
 setInterval(checkSubscriptions, 60 * 60 * 1000);
-
-// Дни рождения — каждый час
 setInterval(checkBirthdays, 60 * 60 * 1000);
-
-// Очистка — каждые 6 часов
 setInterval(cleanupOldDoneTasks, 6 * 60 * 60 * 1000);
-
-// Мотивация — каждую минуту
 setInterval(sendMotivationNotifications, 60 * 1000);
 
-// ✅ Запускаем сразу при старте чтобы не ждать минуту
+// Запускаем сразу при старте
 checkReminders();
 checkSubscriptions();
 
