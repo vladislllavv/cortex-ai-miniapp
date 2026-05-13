@@ -7,7 +7,7 @@ interface CoachAvatarProps {
   size?: number;
 }
 
-export default function CoachAvatar({ state, size = 80 }: CoachAvatarProps) {
+export default function CoachAvatar({ state, size = 90 }: CoachAvatarProps) {
   const mouthFrameRef = useRef(0);
   const animRef = useRef<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -21,13 +21,14 @@ export default function CoachAvatar({ state, size = 80 }: CoachAvatarProps) {
         if (time - lastTime >= interval) {
           mouthFrameRef.current = (mouthFrameRef.current + 1) % 3;
           lastTime = time;
-
-          // Обновляем рот напрямую через DOM без ре-рендера
           const mouthEl = svgRef.current?.querySelector(
-            "#coach-mouth"
+            "#ghost-mouth"
           ) as SVGPathElement | null;
           if (mouthEl) {
-            mouthEl.setAttribute("d", getMouthPath(mouthFrameRef.current, state));
+            mouthEl.setAttribute(
+              "d",
+              getMouthPath(mouthFrameRef.current, state)
+            );
           }
         }
         animRef.current = requestAnimationFrame(animate);
@@ -41,7 +42,7 @@ export default function CoachAvatar({ state, size = 80 }: CoachAvatarProps) {
       }
       mouthFrameRef.current = 0;
       const mouthEl = svgRef.current?.querySelector(
-        "#coach-mouth"
+        "#ghost-mouth"
       ) as SVGPathElement | null;
       if (mouthEl) {
         mouthEl.setAttribute("d", getMouthPath(0, state));
@@ -56,6 +57,8 @@ export default function CoachAvatar({ state, size = 80 }: CoachAvatarProps) {
     };
   }, [state]);
 
+  const bodyColor = getBodyColor(state);
+
   return (
     <div
       style={{
@@ -65,18 +68,18 @@ export default function CoachAvatar({ state, size = 80 }: CoachAvatarProps) {
         flexShrink: 0,
       }}
     >
-      {/* Пульсирующий ореол */}
+      {/* Пульсация */}
       {(state === "speaking" || state === "listening") && (
         <div
           style={{
             position: "absolute",
-            inset: -6,
-            borderRadius: "50%",
+            inset: -8,
+            borderRadius: "50% 50% 30% 30%",
             backgroundColor:
               state === "listening"
-                ? "rgba(239,68,68,0.15)"
-                : "rgba(59,130,246,0.15)",
-            animation: "coachPulse 1.2s ease-in-out infinite",
+                ? "rgba(239,68,68,0.12)"
+                : "rgba(59,130,246,0.12)",
+            animation: "ghostPulse 1.5s ease-in-out infinite",
           }}
         />
       )}
@@ -86,12 +89,12 @@ export default function CoachAvatar({ state, size = 80 }: CoachAvatarProps) {
         <div
           style={{
             position: "absolute",
-            inset: -4,
-            borderRadius: "50%",
+            inset: -5,
+            borderRadius: "50% 50% 30% 30%",
             border: "2px solid transparent",
             borderTopColor: "#3b82f6",
             borderRightColor: "#3b82f6",
-            animation: "coachSpin 0.8s linear infinite",
+            animation: "ghostSpin 0.8s linear infinite",
           }}
         />
       )}
@@ -100,137 +103,185 @@ export default function CoachAvatar({ state, size = 80 }: CoachAvatarProps) {
         ref={svgRef}
         width={size}
         height={size}
-        viewBox="0 0 100 100"
-        style={{ display: "block" }}
+        viewBox="0 0 100 110"
+        style={{
+          display: "block",
+          filter:
+            state === "speaking"
+              ? "drop-shadow(0 0 12px rgba(59,130,246,0.4))"
+              : state === "listening"
+              ? "drop-shadow(0 0 12px rgba(239,68,68,0.3))"
+              : "drop-shadow(0 2px 8px rgba(0,0,0,0.3))",
+          transition: "filter 0.3s ease",
+          animation: state === "idle" ? "ghostFloat 3s ease-in-out infinite" : "none",
+        }}
       >
-        {/* Фон пузыря */}
-        <circle
-          cx="50"
-          cy="50"
-          r="48"
-          fill={getBodyColor(state)}
-          style={{ transition: "fill 0.3s ease" }}
+        {/* Тело привидения */}
+        <path
+          d={`
+            M 50 5
+            C 20 5, 8 28, 8 50
+            L 8 85
+            Q 8 95, 18 90
+            Q 28 85, 32 95
+            Q 36 105, 42 95
+            Q 48 85, 50 95
+            Q 52 85, 58 95
+            Q 64 105, 68 95
+            Q 72 85, 82 90
+            Q 92 95, 92 85
+            L 92 50
+            C 92 28, 80 5, 50 5
+            Z
+          `}
+          fill={bodyColor}
+          style={{ transition: "fill 0.4s ease" }}
         />
 
-        {/* Блик */}
+        {/* Блик на голове */}
         <ellipse
-          cx="36"
-          cy="30"
-          rx="10"
-          ry="7"
-          fill="rgba(255,255,255,0.25)"
-          transform="rotate(-20 36 30)"
+          cx="35"
+          cy="25"
+          rx="12"
+          ry="8"
+          fill="rgba(255,255,255,0.2)"
+          transform="rotate(-15 35 25)"
         />
 
-        {/* Глаза */}
+        {/* Левый глаз */}
         <g>
           {state === "thinking" ? (
-            // Глаза «думает» — смотрит вверх
             <>
-              <circle cx="35" cy="42" r="6" fill="white" />
-              <circle cx="65" cy="42" r="6" fill="white" />
-              <circle cx="35" cy="40" r="3" fill="#1e293b" />
-              <circle cx="65" cy="40" r="3" fill="#1e293b" />
+              <ellipse cx="35" cy="45" rx="8" ry="9" fill="white" />
+              <circle cx="34" cy="42" r="4" fill="#1e293b" />
+              <circle cx="35" cy="40" r="1.5" fill="white" />
             </>
           ) : state === "listening" ? (
-            // Глаза «слушает» — чуть шире
             <>
-              <circle cx="35" cy="43" r="7" fill="white" />
-              <circle cx="65" cy="43" r="7" fill="white" />
-              <circle cx="35" cy="43" r="3.5" fill="#1e293b" />
-              <circle cx="65" cy="43" r="3.5" fill="#1e293b" />
-              {/* Бровь-внимание */}
-              <path
-                d="M29 34 Q35 31 41 34"
-                stroke="#1e293b"
-                strokeWidth="2"
-                fill="none"
-                strokeLinecap="round"
-              />
-              <path
-                d="M59 34 Q65 31 71 34"
-                stroke="#1e293b"
-                strokeWidth="2"
-                fill="none"
-                strokeLinecap="round"
-              />
+              <ellipse cx="35" cy="45" rx="9" ry="10" fill="white" />
+              <circle cx="35" cy="45" r="4.5" fill="#1e293b" />
+              <circle cx="36" cy="43" r="1.5" fill="white" />
             </>
           ) : (
-            // Обычные глаза
             <>
-              <circle cx="35" cy="43" r="6" fill="white" />
-              <circle cx="65" cy="43" r="6" fill="white" />
-              <circle cx="36" cy="44" r="3" fill="#1e293b" />
-              <circle cx="66" cy="44" r="3" fill="#1e293b" />
+              <ellipse cx="35" cy="45" rx="8" ry="9" fill="white" />
+              <circle cx="36" cy="46" r="4" fill="#1e293b" />
+              <circle cx="37" cy="44" r="1.5" fill="white" />
             </>
           )}
-
-          {/* Блики в глазах */}
-          <circle cx="37" cy="41" r="1.2" fill="white" />
-          <circle cx="67" cy="41" r="1.2" fill="white" />
         </g>
 
-        {/* Рот — анимируемый */}
+        {/* Правый глаз */}
+        <g>
+          {state === "thinking" ? (
+            <>
+              <ellipse cx="65" cy="45" rx="8" ry="9" fill="white" />
+              <circle cx="64" cy="42" r="4" fill="#1e293b" />
+              <circle cx="65" cy="40" r="1.5" fill="white" />
+            </>
+          ) : state === "listening" ? (
+            <>
+              <ellipse cx="65" cy="45" rx="9" ry="10" fill="white" />
+              <circle cx="65" cy="45" r="4.5" fill="#1e293b" />
+              <circle cx="66" cy="43" r="1.5" fill="white" />
+            </>
+          ) : (
+            <>
+              <ellipse cx="65" cy="45" rx="8" ry="9" fill="white" />
+              <circle cx="66" cy="46" r="4" fill="#1e293b" />
+              <circle cx="67" cy="44" r="1.5" fill="white" />
+            </>
+          )}
+        </g>
+
+        {/* Брови при listening */}
+        {state === "listening" && (
+          <>
+            <path
+              d="M27 33 Q35 28 43 33"
+              stroke="rgba(255,255,255,0.6)"
+              strokeWidth="2"
+              fill="none"
+              strokeLinecap="round"
+            />
+            <path
+              d="M57 33 Q65 28 73 33"
+              stroke="rgba(255,255,255,0.6)"
+              strokeWidth="2"
+              fill="none"
+              strokeLinecap="round"
+            />
+          </>
+        )}
+
+        {/* Рот */}
         <path
-          id="coach-mouth"
+          id="ghost-mouth"
           d={getMouthPath(0, state)}
-          fill={getMouthFill(state)}
-          stroke={state === "speaking" || state === "listening" ? "#1e293b" : "none"}
-          strokeWidth="1.5"
+          fill={state === "speaking" || state === "listening" ? "#1e293b" : "none"}
+          stroke={
+            state === "idle" || state === "thinking"
+              ? "rgba(255,255,255,0.6)"
+              : "#1e293b"
+          }
+          strokeWidth="2"
           strokeLinecap="round"
-          style={{ transition: state === "idle" ? "d 0.3s ease" : "none" }}
         />
 
         {/* Щёки при speaking */}
         {state === "speaking" && (
           <>
-            <circle cx="22" cy="58" r="8" fill="rgba(255,150,150,0.25)" />
-            <circle cx="78" cy="58" r="8" fill="rgba(255,150,150,0.25)" />
+            <circle cx="22" cy="62" r="6" fill="rgba(255,180,180,0.3)" />
+            <circle cx="78" cy="62" r="6" fill="rgba(255,180,180,0.3)" />
           </>
         )}
 
-        {/* Волны звука при speaking */}
+        {/* Волны звука */}
         {state === "speaking" && (
-          <>
+          <g opacity="0.6">
             <path
-              d="M 82 45 Q 88 50 82 55"
+              d="M 88 42 Q 93 50 88 58"
               stroke="rgba(255,255,255,0.5)"
               strokeWidth="2"
               fill="none"
               strokeLinecap="round"
             />
             <path
-              d="M 87 40 Q 96 50 87 60"
+              d="M 93 37 Q 100 50 93 63"
               stroke="rgba(255,255,255,0.3)"
               strokeWidth="2"
               fill="none"
               strokeLinecap="round"
             />
-          </>
+          </g>
         )}
 
-        {/* Микрофон при listening */}
+        {/* Значок микрофона */}
         {state === "listening" && (
-          <>
-            <circle cx="82" cy="45" r="6" fill="rgba(239,68,68,0.3)" />
+          <g>
+            <circle cx="88" cy="42" r="8" fill="rgba(239,68,68,0.25)" />
             <path
-              d="M82 42 L82 48 M80 44 Q80 47 82 47 Q84 47 84 44"
-              stroke="rgba(239,68,68,0.8)"
-              strokeWidth="1.5"
+              d="M88 38 L88 46 M85 41 Q85 45 88 45 Q91 45 91 41"
+              stroke="rgba(239,68,68,0.9)"
+              strokeWidth="1.8"
               fill="none"
               strokeLinecap="round"
             />
-          </>
+          </g>
         )}
       </svg>
 
       <style>{`
-        @keyframes coachPulse {
-          0%, 100% { transform: scale(1); opacity: 0.6; }
-          50% { transform: scale(1.15); opacity: 1; }
+        @keyframes ghostPulse {
+          0%, 100% { transform: scale(1); opacity: 0.5; }
+          50% { transform: scale(1.12); opacity: 0.9; }
         }
-        @keyframes coachSpin {
+        @keyframes ghostSpin {
           to { transform: rotate(360deg); }
+        }
+        @keyframes ghostFloat {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-5px); }
         }
       `}</style>
     </div>
@@ -246,29 +297,20 @@ function getBodyColor(state: CoachState): string {
   }
 }
 
-function getMouthFill(state: CoachState): string {
-  if (state === "speaking" || state === "listening") return "#1e293b";
-  return "none";
-}
-
-// Три кадра рта для анимации
 function getMouthPath(frame: number, state: CoachState): string {
   if (state === "idle") {
-    // Улыбка
-    return "M 35 62 Q 50 72 65 62";
+    return "M 38 65 Q 50 74 62 65";
   }
   if (state === "thinking") {
-    // Чуть скошенный рот
-    return "M 38 65 Q 50 63 62 67";
+    return "M 42 68 Q 50 66 58 70";
   }
   if (state === "listening" || state === "speaking") {
-    // Три кадра открытого рта
     const frames = [
-      "M 38 62 Q 50 68 62 62 Q 50 58 38 62",     // закрыт
-      "M 37 61 Q 50 72 63 61 Q 50 56 37 61",     // средне открыт
-      "M 36 60 Q 50 76 64 60 Q 50 54 36 60",     // широко открыт
+      "M 40 64 Q 50 70 60 64 Q 50 60 40 64",
+      "M 39 63 Q 50 75 61 63 Q 50 58 39 63",
+      "M 38 62 Q 50 80 62 62 Q 50 56 38 62",
     ];
     return frames[frame] || frames[0];
   }
-  return "M 35 62 Q 50 72 65 62";
+  return "M 38 65 Q 50 74 62 65";
 }
