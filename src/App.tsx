@@ -1,16 +1,17 @@
 import { useState, useEffect } from "react";
-import { Home, Calendar, Bot, Settings, Target } from "lucide-react";
+import { Home, Calendar, Bot, Settings, Target, Ghost } from "lucide-react";
 import HomePage from "@/pages/HomePage";
 import CalendarPage from "@/pages/CalendarPage";
 import AiProcessPage from "@/pages/AiProcessPage";
 import SettingsPage from "@/pages/SettingsPage";
 import WeeklyGoalsPage from "@/pages/WeeklyGoalsPage";
+import CoachPage from "@/pages/CoachPage";
 import AddBtn from "@/components/AddBtn";
 import { usePersistTasks } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
 
-type Tab = "home" | "calendar" | "ai" | "goals" | "settings";
+type Tab = "home" | "calendar" | "ai" | "coach" | "goals" | "settings";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("home");
@@ -50,11 +51,12 @@ export default function App() {
   }, []);
 
   const tabs = [
-    { id: "home" as Tab, icon: Home, label: ru ? "Главная" : "Home" },
-    { id: "calendar" as Tab, icon: Calendar, label: ru ? "Календарь" : "Calendar" },
-    { id: "ai" as Tab, icon: Bot, label: "AI" },
-    { id: "goals" as Tab, icon: Target, label: ru ? "Цели" : "Goals" },
-    { id: "settings" as Tab, icon: Settings, label: ru ? "Настройки" : "Settings" },
+    { id: "home" as Tab,     icon: Home,     label: ru ? "Главная"    : "Home"     },
+    { id: "calendar" as Tab, icon: Calendar, label: ru ? "Календарь"  : "Calendar" },
+    { id: "ai" as Tab,       icon: Bot,      label: "AI"                            },
+    { id: "coach" as Tab,    icon: Ghost,    label: ru ? "Коуч"       : "Coach"    },
+    { id: "goals" as Tab,    icon: Target,   label: ru ? "Цели"       : "Goals"    },
+    { id: "settings" as Tab, icon: Settings, label: ru ? "Настройки"  : "Settings" },
   ];
 
   return (
@@ -107,14 +109,15 @@ export default function App() {
           top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: theme.bg,
           color: "white",
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
           transition: "background-color 0.3s ease",
         }}
       >
-        {/* Основной контент */}
+        {/* Контент */}
         <div
           style={{
             flex: 1,
@@ -137,6 +140,7 @@ export default function App() {
             {tab === "home" && <HomePage />}
             {tab === "calendar" && <CalendarPage />}
             {tab === "ai" && <AiProcessPage />}
+            {tab === "coach" && <CoachPage />}
             {tab === "goals" && <WeeklyGoalsPage />}
             {tab === "settings" && <SettingsPage />}
           </div>
@@ -144,11 +148,13 @@ export default function App() {
 
         {tab === "home" && <AddBtn />}
 
-        {/* Нижняя навигация */}
+        {/* Навигация */}
         <div
           style={{
             position: "fixed",
-            bottom: 0, left: 0, right: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
             height: "68px",
             backgroundColor: theme.bgNav,
             borderTop: "1px solid rgba(255,255,255,0.07)",
@@ -180,24 +186,31 @@ export default function App() {
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
-                    gap: "3px",
+                    gap: "2px",
                     background: "none",
                     border: "none",
                     cursor: "pointer",
-                    padding: "4px 10px",
+                    padding: "4px 6px",
                     WebkitTapHighlightColor: "transparent",
+                    minWidth: 0,
                   }}
                 >
                   <Icon
-                    size={20}
-                    color={isActive ? theme.primary : "rgba(255,255,255,0.35)"}
+                    size={18}
+                    color={
+                      isActive
+                        ? theme.primary
+                        : "rgba(255,255,255,0.35)"
+                    }
                     strokeWidth={isActive ? 2.5 : 1.8}
                   />
                   <span
                     style={{
-                      fontSize: "9px",
+                      fontSize: "8px",
                       fontWeight: isActive ? 600 : 400,
-                      color: isActive ? theme.primary : "rgba(255,255,255,0.35)",
+                      color: isActive
+                        ? theme.primary
+                        : "rgba(255,255,255,0.35)",
                       transition: "color 0.2s ease",
                     }}
                   >
