@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useI18nStore } from "@/lib/i18n";
 import { useTaskStore, getTelegramUserId, checkSubscription } from "@/lib/store";
 import {
@@ -12,8 +12,9 @@ import {
   doc, getDoc, setDoc, collection,
   getDocs, deleteDoc, addDoc, Timestamp,
 } from "firebase/firestore";
-import { Send, Bot, Edit2, Trash2, Plus, Check, X, Lock } from "lucide-react";
+import { Send, Bot, Edit2, Trash2, Plus, Check, X, Lock, Mic, MicOff, VolumeX } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
+import CoachAvatar, { CoachState } from "@/components/CoachAvatar";
 
 const AI_WORKER_URL = "https://ancient-river-8a20.bubo-buboff.workers.dev";
 const COACH_FREE_LIMIT = 2;
@@ -31,7 +32,7 @@ function getCoachUsage(): number {
   return 0;
 }
 
-function setCoachUsage(count: number) {
+function setCoachUsageStorage(count: number) {
   const today = new Date().toISOString().split("T")[0];
   localStorage.setItem(COACH_USAGE_KEY, JSON.stringify({ date: today, count }));
 }
@@ -63,6 +64,42 @@ function getWeekStart(): string {
   return monday.toISOString().split("T")[0];
 }
 
+// ✅ TTS — озвучка текста
+function speakText(
+  text: string,
+  lang: string,
+  onStart: () => void,
+  onEnd: () => void
+) {
+  if (!("speechSynthesis" in window)) {
+    onEnd();
+    return;
+  }
+  window.speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = lang === "ru" ? "ru-RU" : "en-US";
+  utterance.rate = 0.95;
+  utterance.pitch = 1.05;
+  utterance.volume = 1;
+
+  utterance.onstart = onStart;
+  utterance.onend = onEnd;
+  utterance.onerror = onEnd;
+
+  window.speechSynthesis.speak(utterance);
+}
+
+function stopSpeaking() {
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+function isTTSSupported(): boolean {
+  return "speechSynthesis" in window;
+}
+
 export default function WeeklyGoalsPage() {
   const language = useI18nStore((state) => state.language);
   const tasks = useTaskStore((state) => state.tasks);
@@ -86,7 +123,15 @@ export default function WeeklyGoalsPage() {
   const [hasSubscription, setHasSubscription] = useState<boolean | null>(null);
   const [coachUsage, setCoachUsageState] = useState(() => getCoachUsage());
   const [chatHistoryLoaded, setChatHistoryLoaded] = useState(false);
+
+  // ✅ Состояние персонажа коуча
+  const [coachState, setCoachState] = useState<CoachState>("idle");
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const speakingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const weekStart = getWeekStart();
   const currentWeekGoals = goals.filter((g) => g.weekStart === weekStart);
@@ -111,29 +156,26 @@ export default function WeeklyGoalsPage() {
         setGoals(
           loadedGoals.sort(
             (a, b) =>
-              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+              new Date(b.createdAt).getTime() -
+              new Date(a.createdAt).getTime()
           )
         );
-        if (profileSnap.exists())
-          setProfile(profileSnap.data() as UserProfile);
+        if (profileSnap.exists()) setProfile(profileSnap.data() as UserProfile);
       } catch {}
       setLoading(false);
     };
     load();
 
-    // ✅ Загружаем историю чата коуча из Firebase
     loadChatFromFirebase(userId, "ai-coach").then((firebaseMessages) => {
       if (firebaseMessages.length > 0) {
         setAiMessages(firebaseMessages as ChatMessage[]);
-        setChatHistoryLoaded(true);
       } else {
-        // Пробуем из localStorage
         const local = loadCoachChatHistory();
         if (local.length > 0) {
           setAiMessages(local as ChatMessage[]);
         }
-        setChatHistoryLoaded(true);
       }
+      setChatHistoryLoaded(true);
     });
   }, [userId]);
 
@@ -141,12 +183,117 @@ export default function WeeklyGoalsPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [aiMessages]);
 
-  // ✅ Сохраняем историю чата при каждом изменении
   useEffect(() => {
     if (chatHistoryLoaded && aiMessages.length > 0) {
       saveCoachChatHistory(aiMessages);
     }
   }, [aiMessages, chatHistoryLoaded]);
+
+  // Cleanup TTS и микрофон при закрытии
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+        recognitionRef.current = null;
+      }
+      if (speakingTimeoutRef.current) {
+        clearTimeout(speakingTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // ✅ Запуск TTS для ответа коуча
+  const handleCoachSpeak = useCallback(
+    (text: string) => {
+      if (!ttsEnabled || !isTTSSupported()) {
+        setCoachState("idle");
+        return;
+      }
+
+      // Очищаем служебные блоки
+      const cleanText = text
+        .replace(/GOALS_JSON:\[[\s\S]*?\]/g, "")
+        .replace(/✅ Добавлено .+ целей.*$/m, "")
+        .replace(/✅ Added .+ goals.*$/m, "")
+        .trim();
+
+      if (!cleanText) {
+        setCoachState("idle");
+        return;
+      }
+
+      setCoachState("speaking");
+
+      speakText(
+        cleanText,
+        language,
+        () => setCoachState("speaking"),
+        () => setCoachState("idle")
+      );
+    },
+    [ttsEnabled, language]
+  );
+
+  // ✅ Голосовой ввод
+  const startListening = useCallback(() => {
+    const SR =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SR) {
+      const tg = (window as any).Telegram?.WebApp;
+      tg?.showAlert(
+        ru
+          ? "Голосовой ввод не поддерживается в этом браузере"
+          : "Voice input not supported in this browser"
+      );
+      return;
+    }
+
+    stopSpeaking();
+    setCoachState("listening");
+    setIsListening(true);
+
+    const r = new SR();
+    r.lang = ru ? "ru-RU" : "en-US";
+    r.continuous = false;
+    r.interimResults = false;
+
+    r.onresult = (e: any) => {
+      const transcript = e.results[0][0].transcript;
+      setAiInput(transcript);
+      setIsListening(false);
+      setCoachState("idle");
+      recognitionRef.current = null;
+      // Автоотправляем
+      setTimeout(() => sendAiMessage(transcript), 100);
+    };
+
+    r.onerror = () => {
+      setIsListening(false);
+      setCoachState("idle");
+      recognitionRef.current = null;
+    };
+
+    r.onend = () => {
+      setIsListening(false);
+      if (coachState === "listening") setCoachState("idle");
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = r;
+    r.start();
+  }, [ru, coachState]);
+
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.abort();
+      recognitionRef.current = null;
+    }
+    setIsListening(false);
+    setCoachState("idle");
+  }, []);
 
   const toggleGoal = async (id: string) => {
     const updated = goals.map((g) =>
@@ -185,6 +332,7 @@ export default function WeeklyGoalsPage() {
         newGoal
       ).catch(() => {});
 
+      // ✅ addTask — единственная точка записи, без ручного addDoc
       const savedTask = await addTask({
         title: `🎯 ${text}`,
         dueDate: dueDate || undefined,
@@ -197,27 +345,9 @@ export default function WeeklyGoalsPage() {
         items: [],
       });
 
-      if (dueDate && savedTask) {
-        const dueObj = new Date(dueDate);
-        if (!isNaN(dueObj.getTime()) && dueObj > new Date()) {
-          addDoc(collection(db, "tasks"), {
-            userId,
-            taskId: savedTask.id,
-            title: `🎯 ${text}`,
-            description: ru
-              ? "Цель недели от AI коуча"
-              : "Weekly goal from AI coach",
-            dueDate,
-            priority: "medium",
-            status: "todo",
-            createdAt: new Date().toISOString(),
-            isSent: false,
-            reminderAt: Timestamp.fromDate(dueObj),
-            repeat: "none",
-            type: "task",
-          }).catch(() => {});
-        }
-      }
+      // Напоминание через бот создаётся автоматически в store.upsertBotTask
+      // Ручной addDoc убран
+      void savedTask;
     }
 
     return newGoal;
@@ -274,8 +404,8 @@ export default function WeeklyGoalsPage() {
       const tg = (window as any).Telegram?.WebApp;
       tg?.showAlert(
         ru
-          ? `Лимит ${COACH_FREE_LIMIT} запросов в день 🤖\n\nОформи подписку для безлимитного доступа к AI коучу!`
-          : `Daily limit of ${COACH_FREE_LIMIT} requests 🤖\n\nGet subscription for unlimited AI coach access!`
+          ? `Лимит ${COACH_FREE_LIMIT} запросов в день 🤖\n\nОформи подписку!`
+          : `Daily limit of ${COACH_FREE_LIMIT} requests 🤖\n\nGet subscription!`
       );
       tg?.openTelegramLink("https://t.me/aiplannerrubot?start=subscribe");
       return;
@@ -290,11 +420,12 @@ export default function WeeklyGoalsPage() {
     setAiMessages(newMessages);
     setAiInput("");
     setAiLoading(true);
+    setCoachState("thinking");
 
     if (hasSubscription === false) {
       const nc = coachUsage + 1;
       setCoachUsageState(nc);
-      setCoachUsage(nc);
+      setCoachUsageStorage(nc);
     }
 
     try {
@@ -307,9 +438,7 @@ export default function WeeklyGoalsPage() {
       const systemPrompt = `Ты персональный AI коуч в приложении CortexAI. Ведёшь диалог с пользователем.
 
 Профиль: ${profileStr || "не заполнен"}
-Активные задачи: ${
-        activeTasks.map((t) => t.title).join(", ") || "нет"
-      }
+Активные задачи: ${activeTasks.map((t) => t.title).join(", ") || "нет"}
 Цели этой недели: ${
         currentWeekGoals.length > 0
           ? currentWeekGoals
@@ -378,36 +507,27 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
         ...prev,
         { role: "assistant", content: finalMsg, timestamp: Date.now() },
       ]);
+
+      // ✅ Запускаем TTS и анимацию
+      handleCoachSpeak(finalMsg);
     } catch (err) {
       console.error("AI error:", err);
+      const errorMsg = ru
+        ? "⚠️ Ошибка подключения. Попробуй ещё раз."
+        : "⚠️ Connection error. Try again.";
       setAiMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: ru
-            ? "⚠️ Ошибка подключения. Попробуй ещё раз."
-            : "⚠️ Connection error. Try again.",
-          timestamp: Date.now(),
-        },
+        { role: "assistant", content: errorMsg, timestamp: Date.now() },
       ]);
+      setCoachState("idle");
     } finally {
       setAiLoading(false);
     }
   };
 
   const quickPrompts = ru
-    ? [
-        "Составь план на неделю",
-        "Оцени мой прогресс",
-        "Дай советы по продуктивности",
-        "Еженедельный тест",
-      ]
-    : [
-        "Create weekly plan",
-        "Assess my progress",
-        "Productivity tips",
-        "Weekly check-in",
-      ];
+    ? ["Составь план на неделю", "Оцени мой прогресс", "Советы по продуктивности"]
+    : ["Create weekly plan", "Assess my progress", "Productivity tips"];
 
   if (loading) {
     return (
@@ -491,7 +611,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                         hasSubscription === false
                           ? `⚠️ Осталось ${COACH_FREE_LIMIT - coachUsage} из ${COACH_FREE_LIMIT} бесплатных запросов.\n\n`
                           : ""
-                      }Заполни профиль 👤 — и я составлю персональный план!\n\nИли задай вопрос прямо сейчас 💪`
+                      }Заполни профиль 👤 и я составлю персональный план!\n\nИли задай вопрос прямо сейчас 💪`
                     : `Hi! 👋 I'm your AI coach.\n\n${
                         hasSubscription === false
                           ? `⚠️ ${COACH_FREE_LIMIT - coachUsage} of ${COACH_FREE_LIMIT} free requests left.\n\n`
@@ -500,6 +620,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                   timestamp: Date.now(),
                 };
                 setAiMessages([welcomeMsg]);
+                setTimeout(() => handleCoachSpeak(welcomeMsg.content), 500);
               }
             }}
             style={{
@@ -519,7 +640,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
         </div>
       </div>
 
-      {/* ===== ЛИМИТ ЗАПРОСОВ ===== */}
+      {/* ===== ЛИМИТ ===== */}
       {hasSubscription === false && (
         <div
           style={{
@@ -545,9 +666,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
           <p
             style={{
               fontSize: "12px",
-              color: isLimited
-                ? "#fca5a5"
-                : "rgba(255,255,255,0.5)",
+              color: isLimited ? "#fca5a5" : "rgba(255,255,255,0.5)",
               margin: 0,
               flex: 1,
             }}
@@ -555,8 +674,8 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
             {isLimited
               ? ru ? "Лимит AI коуча исчерпан" : "AI coach limit reached"
               : ru
-              ? `AI коуч: ${COACH_FREE_LIMIT - coachUsage} из ${COACH_FREE_LIMIT} бесплатных запросов`
-              : `AI coach: ${COACH_FREE_LIMIT - coachUsage} of ${COACH_FREE_LIMIT} free requests`}
+              ? `AI коуч: ${COACH_FREE_LIMIT - coachUsage} из ${COACH_FREE_LIMIT} запросов`
+              : `AI coach: ${COACH_FREE_LIMIT - coachUsage} of ${COACH_FREE_LIMIT} requests`}
           </p>
           {isLimited && (
             <button
@@ -702,9 +821,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
             onChange={(e) => setNewGoalText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addManualGoal()}
             placeholder={
-              ru
-                ? "Напиши цель на эту неделю..."
-                : "Write a goal for this week..."
+              ru ? "Напиши цель на эту неделю..." : "Write a goal for this week..."
             }
             style={{
               display: "block",
@@ -791,9 +908,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
               margin: 0,
             }}
           >
-            {ru
-              ? "Добавь сам или попроси AI коуча"
-              : "Add manually or ask AI coach"}
+            {ru ? "Добавь сам или попроси AI коуча" : "Add manually or ask AI coach"}
           </p>
         </div>
       ) : (
@@ -820,9 +935,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                     autoFocus
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && saveEdit(goal.id)
-                    }
+                    onKeyDown={(e) => e.key === "Enter" && saveEdit(goal.id)}
                     style={{
                       flex: 1,
                       height: "36px",
@@ -874,11 +987,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                 </div>
               ) : (
                 <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                  }}
+                  style={{ display: "flex", alignItems: "center", gap: "12px" }}
                 >
                   <button
                     onClick={() => toggleGoal(goal.id)}
@@ -888,9 +997,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                       minWidth: "22px",
                       borderRadius: "50%",
                       border: `2px solid ${
-                        goal.completed
-                          ? "#22c55e"
-                          : "rgba(255,255,255,0.25)"
+                        goal.completed ? "#22c55e" : "rgba(255,255,255,0.25)"
                       }`,
                       backgroundColor: goal.completed
                         ? "#22c55e"
@@ -905,12 +1012,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                     }}
                   >
                     {goal.completed && (
-                      <svg
-                        width="11"
-                        height="11"
-                        viewBox="0 0 12 12"
-                        fill="none"
-                      >
+                      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
                         <path
                           d="M2 6L5 9L10 3"
                           stroke="white"
@@ -928,9 +1030,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                         color: goal.completed
                           ? "rgba(255,255,255,0.4)"
                           : "rgba(255,255,255,0.9)",
-                        textDecoration: goal.completed
-                          ? "line-through"
-                          : "none",
+                        textDecoration: goal.completed ? "line-through" : "none",
                         margin: 0,
                         wordBreak: "break-word",
                         lineHeight: "1.4",
@@ -1087,7 +1187,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
             {[
               { key: "weight", label: ru ? "Вес (кг)" : "Weight (kg)", placeholder: "70" },
               { key: "height", label: ru ? "Рост (см)" : "Height (cm)", placeholder: "175" },
-              { key: "age",    label: ru ? "Возраст"   : "Age",          placeholder: "30" },
+              { key: "age",    label: ru ? "Возраст"  : "Age",          placeholder: "30" },
             ].map(({ key, label, placeholder }) => (
               <div key={key} style={{ marginBottom: "12px" }}>
                 <p
@@ -1134,11 +1234,13 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
               >
                 {ru ? "Уровень активности" : "Activity level"}
               </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: "6px" }}
+              >
                 {[
-                  { value: "low",    label: ru ? "Низкий (сидячая работа)"         : "Low (sedentary)"   },
-                  { value: "medium", label: ru ? "Средний (2-3 тренировки/нед)"    : "Medium (2-3x/week)" },
-                  { value: "high",   label: ru ? "Высокий (5+ тренировок/нед)"     : "High (5+x/week)"   },
+                  { value: "low",    label: ru ? "Низкий (сидячая работа)"      : "Low (sedentary)"   },
+                  { value: "medium", label: ru ? "Средний (2-3 тренировки/нед)" : "Medium (2-3x/week)" },
+                  { value: "high",   label: ru ? "Высокий (5+ тренировок/нед)"  : "High (5+x/week)"   },
                 ].map((opt) => (
                   <button
                     key={opt.value}
@@ -1233,92 +1335,153 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
         </div>
       )}
 
-      {/* ===== AI КОУЧ ЧАТ ===== */}
+      {/* ===== AI КОУЧ ЧАТ С ПЕРСОНАЖЕМ ===== */}
       {showAI && (
         <div
           style={{
             position: "fixed",
             inset: 0,
             zIndex: 200,
-            backgroundColor: "rgba(0,0,0,0.92)",
+            backgroundColor: "rgba(0,0,0,0.95)",
             display: "flex",
             flexDirection: "column",
           }}
         >
-          {/* Шапка */}
+          {/* ===== ШАПКА С ПЕРСОНАЖЕМ ===== */}
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              padding: "16px 16px 12px",
               backgroundColor: theme.bg,
               borderBottom: "1px solid rgba(255,255,255,0.07)",
+              paddingBottom: "12px",
             }}
           >
+            {/* Верхняя строка */}
             <div
               style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "10px",
-                backgroundColor: `${theme.primary}20`,
-                border: `1px solid ${theme.primary}40`,
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
+                justifyContent: "space-between",
+                padding: "14px 16px 8px",
               }}
             >
-              <Bot size={18} color={theme.primary} />
+              <div>
+                <p
+                  style={{
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    color: "white",
+                    margin: 0,
+                  }}
+                >
+                  AI {ru ? "Коуч" : "Coach"}
+                </p>
+                <p
+                  style={{
+                    fontSize: "11px",
+                    color: isLimited ? "#fca5a5" : "rgba(255,255,255,0.4)",
+                    margin: 0,
+                  }}
+                >
+                  {hasSubscription === true
+                    ? ru ? "Безлимитный доступ ✅" : "Unlimited ✅"
+                    : isLimited
+                    ? ru ? "Лимит исчерпан" : "Limit reached"
+                    : ru
+                    ? `${COACH_FREE_LIMIT - coachUsage} из ${COACH_FREE_LIMIT} запросов`
+                    : `${COACH_FREE_LIMIT - coachUsage} of ${COACH_FREE_LIMIT}`}
+                </p>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                {/* Кнопка TTS вкл/выкл */}
+                {isTTSSupported() && (
+                  <button
+                    onClick={() => {
+                      if (ttsEnabled) stopSpeaking();
+                      setTtsEnabled(!ttsEnabled);
+                    }}
+                    style={{
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "8px",
+                      border: `1px solid ${
+                        ttsEnabled
+                          ? `${theme.primary}50`
+                          : "rgba(255,255,255,0.1)"
+                      }`,
+                      backgroundColor: ttsEnabled
+                        ? `${theme.primary}20`
+                        : "rgba(255,255,255,0.05)",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                    title={
+                      ttsEnabled
+                        ? ru ? "Выключить озвучку" : "Disable TTS"
+                        : ru ? "Включить озвучку" : "Enable TTS"
+                    }
+                  >
+                    {ttsEnabled ? (
+                      <span style={{ fontSize: "14px" }}>🔊</span>
+                    ) : (
+                      <VolumeX size={14} color="rgba(255,255,255,0.4)" />
+                    )}
+                  </button>
+                )}
+
+                <button
+                  onClick={() => {
+                    stopSpeaking();
+                    stopListening();
+                    setShowAI(false);
+                    setCoachState("idle");
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "4px",
+                  }}
+                >
+                  <X size={20} color="rgba(255,255,255,0.5)" />
+                </button>
+              </div>
             </div>
-            <div style={{ flex: 1 }}>
-              <p
-                style={{
-                  fontSize: "15px",
-                  fontWeight: 700,
-                  color: "white",
-                  margin: 0,
-                }}
-              >
-                AI {ru ? "Коуч" : "Coach"}
-              </p>
-              <p
-                style={{
-                  fontSize: "11px",
-                  color: isLimited
-                    ? "#fca5a5"
-                    : "rgba(255,255,255,0.4)",
-                  margin: 0,
-                }}
-              >
-                {hasSubscription === true
-                  ? ru ? "Безлимитный доступ ✅" : "Unlimited access ✅"
-                  : isLimited
-                  ? ru ? "Лимит исчерпан" : "Limit reached"
-                  : ru
-                  ? `${COACH_FREE_LIMIT - coachUsage} из ${COACH_FREE_LIMIT} запросов`
-                  : `${COACH_FREE_LIMIT - coachUsage} of ${COACH_FREE_LIMIT}`}
-              </p>
-            </div>
-            <button
-              onClick={() => setShowAI(false)}
+
+            {/* ✅ ПЕРСОНАЖ КОУЧА */}
+            <div
               style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: "4px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                paddingBottom: "4px",
               }}
             >
-              <X size={20} color="rgba(255,255,255,0.5)" />
-            </button>
+              <CoachAvatar state={coachState} size={90} />
+              <div
+                style={{
+                  marginTop: "8px",
+                  fontSize: "11px",
+                  color: "rgba(255,255,255,0.4)",
+                  height: "16px",
+                }}
+              >
+                {coachState === "idle" && (ru ? "Готов помочь 💪" : "Ready to help 💪")}
+                {coachState === "listening" && (ru ? "Слушаю..." : "Listening...")}
+                {coachState === "thinking" && (ru ? "Думаю..." : "Thinking...")}
+                {coachState === "speaking" && (ru ? "Говорю..." : "Speaking...")}
+              </div>
+            </div>
           </div>
 
-          {/* Сообщения */}
+          {/* ===== СООБЩЕНИЯ ===== */}
           <div
             style={{
               flex: 1,
               overflowY: "auto",
-              padding: "16px",
+              padding: "12px 16px",
               display: "flex",
               flexDirection: "column",
               gap: "10px",
@@ -1371,9 +1534,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
             ))}
 
             {aiLoading && (
-              <div
-                style={{ display: "flex", justifyContent: "flex-start" }}
-              >
+              <div style={{ display: "flex", justifyContent: "flex-start" }}>
                 <div
                   style={{
                     padding: "10px 14px",
@@ -1397,15 +1558,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                       }}
                     />
                   ))}
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      color: "rgba(255,255,255,0.4)",
-                      marginLeft: "4px",
-                    }}
-                  >
-                    {ru ? "Думаю..." : "Thinking..."}
-                  </span>
                 </div>
               </div>
             )}
@@ -1440,7 +1592,7 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
               </div>
             )}
 
-            {/* Лимит */}
+            {/* Лимит исчерпан */}
             {isLimited && (
               <div
                 style={{
@@ -1490,14 +1642,15 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
             <div ref={messagesEndRef} />
           </div>
 
-          {/* ✅ Поле ввода — теперь можно писать ответы */}
+          {/* ===== ПОЛЕ ВВОДА ===== */}
           <div
             style={{
               display: "flex",
               gap: "8px",
-              padding: "12px 16px 20px",
+              padding: "10px 16px 20px",
               borderTop: "1px solid rgba(255,255,255,0.07)",
               backgroundColor: theme.bg,
+              alignItems: "flex-end",
             }}
           >
             {isLimited ? (
@@ -1520,10 +1673,38 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                   cursor: "pointer",
                 }}
               >
-                🔓 {ru ? "Оформить подписку для продолжения" : "Get subscription to continue"}
+                🔓 {ru ? "Оформить подписку" : "Get subscription"}
               </button>
             ) : (
               <>
+                {/* Кнопка микрофона */}
+                <button
+                  onClick={isListening ? stopListening : startListening}
+                  style={{
+                    width: "40px",
+                    height: "40px",
+                    minWidth: "40px",
+                    borderRadius: "50%",
+                    backgroundColor: isListening
+                      ? "#ef4444"
+                      : "rgba(255,255,255,0.08)",
+                    border: isListening
+                      ? "2px solid #fca5a5"
+                      : "1px solid rgba(255,255,255,0.1)",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {isListening ? (
+                    <MicOff size={16} color="white" />
+                  ) : (
+                    <Mic size={16} color="rgba(255,255,255,0.6)" />
+                  )}
+                </button>
+
                 <textarea
                   value={aiInput}
                   onChange={(e) => setAiInput(e.target.value)}
@@ -1534,15 +1715,19 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                     }
                   }}
                   placeholder={
-                    ru
-                      ? "Напиши коучу..."
-                      : "Message AI coach..."
+                    isListening
+                      ? ru ? "Говорю..." : "Listening..."
+                      : ru ? "Напиши коучу..." : "Message AI coach..."
                   }
                   rows={1}
                   style={{
                     flex: 1,
-                    backgroundColor: "rgba(255,255,255,0.07)",
-                    border: "1px solid rgba(255,255,255,0.1)",
+                    backgroundColor: isListening
+                      ? "rgba(239,68,68,0.1)"
+                      : "rgba(255,255,255,0.07)",
+                    border: isListening
+                      ? "1px solid rgba(239,68,68,0.3)"
+                      : "1px solid rgba(255,255,255,0.1)",
                     borderRadius: "14px",
                     padding: "10px 12px",
                     fontSize: "16px",
@@ -1555,21 +1740,24 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                     fontFamily: "inherit",
                   }}
                 />
+
                 <button
                   onClick={() => sendAiMessage()}
-                  disabled={!aiInput.trim() || aiLoading}
+                  disabled={!aiInput.trim() || aiLoading || isListening}
                   style={{
                     width: "40px",
                     height: "40px",
                     minWidth: "40px",
                     borderRadius: "50%",
                     backgroundColor:
-                      aiInput.trim() && !aiLoading
+                      aiInput.trim() && !aiLoading && !isListening
                         ? theme.primary
                         : "rgba(255,255,255,0.08)",
                     border: "none",
                     cursor:
-                      aiInput.trim() && !aiLoading ? "pointer" : "default",
+                      aiInput.trim() && !aiLoading && !isListening
+                        ? "pointer"
+                        : "default",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
