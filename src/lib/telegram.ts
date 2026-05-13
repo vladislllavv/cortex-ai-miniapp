@@ -1,4 +1,21 @@
+export type TgUser = {
+  id: string;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+};
+
 type HapticStyle = "light" | "medium" | "heavy" | "success" | "error" | "warning";
+
+export function setupTelegram(): void {
+  try {
+    const tg = (window as any).Telegram?.WebApp;
+    if (!tg) return;
+    tg.ready?.();
+    tg.expand?.();
+  } catch {}
+}
 
 export function triggerHaptic(style: HapticStyle = "light"): void {
   try {
@@ -45,19 +62,17 @@ export function openTelegramLink(url: string): void {
   } catch {}
 }
 
-export function getTelegramUser(): {
-  id: string;
-  name: string;
-  username?: string;
-} | null {
+export function getTelegramUser(): TgUser | null {
   try {
     const tg = (window as any).Telegram?.WebApp;
     const user = tg?.initDataUnsafe?.user;
-    if (!user) return null;
+    if (!user?.id) return null;
     return {
       id: String(user.id),
-      name: [user.first_name, user.last_name].filter(Boolean).join(" "),
+      first_name: user.first_name,
+      last_name: user.last_name,
       username: user.username,
+      photo_url: user.photo_url,
     };
   } catch {
     return null;
