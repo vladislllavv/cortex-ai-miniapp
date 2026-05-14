@@ -17,8 +17,8 @@ export default function AiHubPage() {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 120px)",
-        maxHeight: "calc(100vh - 120px)",
+        flex: 1,
+        minHeight: 0,
         overflow: "hidden",
       }}
     >
@@ -37,7 +37,7 @@ export default function AiHubPage() {
         {(
           [
             { id: "assistant" as AiTab, label: ru ? "Ассистент" : "Assistant", emoji: "⚡" },
-            { id: "coach"     as AiTab, label: ru ? "Коуч"       : "Coach",     emoji: "👻" },
+            { id: "coach"     as AiTab, label: ru ? "Коуч"      : "Coach",     emoji: "👻" },
           ]
         ).map(({ id, label, emoji }) => (
           <button
@@ -48,8 +48,7 @@ export default function AiHubPage() {
               height: "34px",
               borderRadius: "9px",
               border: "none",
-              backgroundColor:
-                aiTab === id ? theme.primary : "transparent",
+              backgroundColor: aiTab === id ? theme.primary : "transparent",
               color: aiTab === id ? "white" : "rgba(255,255,255,0.5)",
               fontSize: "13px",
               fontWeight: aiTab === id ? 600 : 400,
@@ -67,10 +66,18 @@ export default function AiHubPage() {
         ))}
       </div>
 
-      {/* Контент — убираем overflow чтобы не было двойного скролла */}
-      <div style={{ flex: 1, overflow: "hidden", minHeight: 0 }}>
+      {/* Контент — flex:1 чтобы занять оставшееся место */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         {aiTab === "assistant" && <AiProcessPage embedded />}
-        {aiTab === "coach" && <CoachPage embedded />}
+        {aiTab === "coach"     && <CoachPage embedded />}
       </div>
     </div>
   );
