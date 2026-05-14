@@ -1,5 +1,4 @@
 export type WorkspaceType = "personal" | "team";
-
 export type WorkspaceRole = "owner" | "admin" | "member";
 
 export interface Workspace {
@@ -12,6 +11,7 @@ export interface Workspace {
   linkedChatId?: string;
   emoji?: string;
   color?: string;
+  description?: string;
 }
 
 export interface WorkspaceMember {
@@ -23,6 +23,7 @@ export interface WorkspaceMember {
 }
 
 export interface WorkspaceInvite {
+  id: string;
   workspaceId: string;
   workspaceName: string;
   invitedBy: string;
