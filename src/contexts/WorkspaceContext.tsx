@@ -2,7 +2,6 @@ import {
   createContext,
   useContext,
   useState,
-  useEffect,
   useCallback,
   PropsWithChildren,
 } from "react";
@@ -14,10 +13,7 @@ import {
   getDocs,
   collection,
 } from "firebase/firestore";
-import {
-  Workspace,
-  WorkspaceRole,
-} from "@/types/workspace";
+import { Workspace, WorkspaceRole } from "@/types/workspace";
 import { paths, PERSONAL_WORKSPACE_ID } from "@/lib/workspacePaths";
 
 interface WorkspaceContextValue {
@@ -25,9 +21,14 @@ interface WorkspaceContextValue {
   activeWorkspaceId: string;
   activeWorkspace: Workspace | null;
   role: WorkspaceRole;
+  isLoaded: boolean;
   setActiveWorkspaceId: (id: string) => void;
   loadWorkspaces: (userId: string) => Promise<void>;
-  isLoaded: boolean;
+  createTeamWorkspace: (
+    userId: string,
+    name: string,
+    emoji?: string
+  ) => Promise<Workspace>;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue>({
@@ -35,15 +36,18 @@ const WorkspaceContext = createContext<WorkspaceContextValue>({
   activeWorkspaceId: PERSONAL_WORKSPACE_ID,
   activeWorkspace: null,
   role: "owner",
+  isLoaded: false,
   setActiveWorkspaceId: () => {},
   loadWorkspaces: async () => {},
-  isLoaded: false,
+  createTeamWorkspace: async () => ({} as Workspace),
 });
 
 export function WorkspaceProvider({ children }: PropsWithChildren) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string>(
-    () => localStorage.getItem("cortex-active-workspace") || PERSONAL_WORKSPACE_ID
+    () =>
+      localStorage.getItem("cortex-active-workspace") ||
+      PERSONAL_WORKSPACE_ID
   );
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -54,15 +58,12 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
 
   const ensurePersonalWorkspace = useCallback(
     async (userId: string): Promise<Workspace> => {
-      const personalRef = doc(
+      const ref = doc(
         db,
         paths.userWorkspace(userId, PERSONAL_WORKSPACE_ID)
       );
-      const snap = await getDoc(personalRef);
-
-      if (snap.exists()) {
-        return snap.data() as Workspace;
-      }
+      const snap = await getDoc(ref);
+      if (snap.exists()) return snap.data() as Workspace;
 
       const personal: Workspace = {
         id: PERSONAL_WORKSPACE_ID,
@@ -73,58 +74,90 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
         emoji: "👤",
         color: "#3b82f6",
       };
-
-      await setDoc(personalRef, personal);
+      await setDoc(ref, personal);
       return personal;
     },
     []
   );
 
-  const loadWorkspaces = useCallback(async (userId: string) => {
-    if (!userId || userId === "unknown") {
-      setIsLoaded(true);
-      return;
-    }
+  const loadWorkspaces = useCallback(
+    async (userId: string) => {
+      if (!userId || userId === "unknown") {
+        setIsLoaded(true);
+        return;
+      }
+      try {
+        const personal = await ensurePersonalWorkspace(userId);
+        const snap = await getDocs(
+          collection(db, paths.userWorkspaces(userId))
+        );
+        const all: Workspace[] = [];
+        snap.forEach((d) => all.push(d.data() as Workspace));
 
-    try {
-      const personal = await ensurePersonalWorkspace(userId);
-      const snap = await getDocs(
-        collection(db, paths.userWorkspaces(userId))
+        // Личный всегда первый
+        const sorted = [
+          personal,
+          ...all.filter((w) => w.id !== PERSONAL_WORKSPACE_ID),
+        ];
+        setWorkspaces(sorted);
+      } catch (e) {
+        console.error("loadWorkspaces:", e);
+        setWorkspaces([
+          {
+            id: PERSONAL_WORKSPACE_ID,
+            name: "Личное",
+            type: "personal",
+            ownerId: userId,
+            createdAt: new Date().toISOString(),
+            emoji: "👤",
+            color: "#3b82f6",
+          },
+        ]);
+      } finally {
+        setIsLoaded(true);
+      }
+    },
+    [ensurePersonalWorkspace]
+  );
+
+  const createTeamWorkspace = useCallback(
+    async (
+      userId: string,
+      name: string,
+      emoji = "👥"
+    ): Promise<Workspace> => {
+      const id = `team_${Date.now()}_${Math.random()
+        .toString(36)
+        .substr(2, 6)}`;
+      const workspace: Workspace = {
+        id,
+        name,
+        type: "team",
+        ownerId: userId,
+        createdAt: new Date().toISOString(),
+        emoji,
+        color: "#6366f1",
+      };
+      await setDoc(
+        doc(db, paths.userWorkspace(userId, id)),
+        workspace
       );
-      const all: Workspace[] = [];
-      snap.forEach((d) => all.push(d.data() as Workspace));
-
-      // Личный всегда первый
-      const sorted = [
-        personal,
-        ...all.filter((w) => w.id !== PERSONAL_WORKSPACE_ID),
-      ];
-      setWorkspaces(sorted);
-    } catch (e) {
-      console.error("Load workspaces error:", e);
-      // Fallback — показываем личный
-      setWorkspaces([
-        {
-          id: PERSONAL_WORKSPACE_ID,
-          name: "Личное",
-          type: "personal",
-          ownerId: userId,
-          createdAt: new Date().toISOString(),
-          emoji: "👤",
-          color: "#3b82f6",
-        },
-      ]);
-    } finally {
-      setIsLoaded(true);
-    }
-  }, [ensurePersonalWorkspace]);
+      setWorkspaces((prev) => [...prev, workspace]);
+      return workspace;
+    },
+    []
+  );
 
   const activeWorkspace =
-    workspaces.find((w) => w.id === activeWorkspaceId) ?? workspaces[0] ?? null;
+    workspaces.find((w) => w.id === activeWorkspaceId) ??
+    workspaces[0] ??
+    null;
 
-  // Роль — для личного всегда owner
+  // Роль: для личного всегда owner
   const role: WorkspaceRole =
-    activeWorkspace?.type === "personal" ? "owner" : "owner";
+    activeWorkspace?.ownerId === activeWorkspace?.ownerId
+      ? "owner"
+      : "member";
 
   return (
     <WorkspaceContext.Provider
@@ -133,9 +166,10 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
         activeWorkspaceId,
         activeWorkspace,
         role,
+        isLoaded,
         setActiveWorkspaceId,
         loadWorkspaces,
-        isLoaded,
+        createTeamWorkspace,
       }}
     >
       {children}
