@@ -9,13 +9,13 @@ export type TgUser = {
 type HapticStyle = "light" | "medium" | "heavy" | "success" | "error" | "warning";
 
 // ═══════════════════════════════════════════════════════════════════
-// НАСТРОЙКИ БОТА — ОБЯЗАТЕЛЬНО ЗАМЕНИ НА СВОИ ЗНАЧЕНИЯ
+// НАСТРОЙКИ БОТА — ЗАМЕНИ НА СВОИ
 // ═══════════════════════════════════════════════════════════════════
-export const BOT_USERNAME = "CortexAITaskBot"; // ← имя твоего бота без @
-export const APP_NAME = "app";                 // ← short_name Mini App из @BotFather
+export const BOT_USERNAME = "CortexAITaskBot"; // имя бота без @
+export const APP_NAME = "app";                 // short_name Mini App из @BotFather
 // ═══════════════════════════════════════════════════════════════════
 
-// ─── Базовые функции (старые, не трогаем) ────────────────────────
+// ─── Базовые функции ────────────────────────────────────────────────
 
 export function setupTelegram(): void {
   try {
@@ -95,12 +95,11 @@ export function closeMiniApp(): void {
   } catch {}
 }
 
-// ─── НОВЫЕ функции для команд ────────────────────────────────────
+// ─── Алиасы для team-функционала ────────────────────────────────────
 
-/**
- * Алиасы для совместимости с teamStore/TeamPage
- */
 export const haptic = triggerHaptic;
+export const getTgUser = getTelegramUser;
+
 export const tgAlert = (message: string): Promise<void> =>
   new Promise((resolve) => {
     try {
@@ -130,11 +129,8 @@ export const tgConfirm = (message: string): Promise<boolean> =>
     }
   });
 
-export const getTgUser = getTelegramUser;
+// ─── Инвайт-ссылки и старт-параметры ────────────────────────────────
 
-/**
- * Получает start_param при запуске мини-аппа
- */
 export function getStartParam(): string | null {
   try {
     const tg = (window as any).Telegram?.WebApp;
@@ -144,9 +140,6 @@ export function getStartParam(): string | null {
   }
 }
 
-/**
- * Парсит start_param: возвращает invite-код если это инвайт
- */
 export function parseStartParam(): { type: "join"; code: string } | null {
   const param = getStartParam();
   if (!param) return null;
@@ -156,17 +149,10 @@ export function parseStartParam(): { type: "join"; code: string } | null {
   return null;
 }
 
-/**
- * Строит deep-link для приглашения в команду
- * Формат: https://t.me/BOT/app?startapp=join_CODE
- */
 export function buildInviteLink(inviteCode: string): string {
   return `https://t.me/${BOT_USERNAME}/${APP_NAME}?startapp=join_${inviteCode}`;
 }
 
-/**
- * Открывает диалог "Поделиться" в Telegram с готовой ссылкой
- */
 export function shareInviteToTelegram(
   inviteCode: string,
   wsName: string,
@@ -191,9 +177,6 @@ export function shareInviteToTelegram(
   } catch {}
 }
 
-/**
- * Копирует ссылку-приглашение в буфер обмена
- */
 export async function copyInviteLink(inviteCode: string): Promise<void> {
   const link = buildInviteLink(inviteCode);
   try {
@@ -202,9 +185,6 @@ export async function copyInviteLink(inviteCode: string): Promise<void> {
   } catch {}
 }
 
-/**
- * Копирует только код в буфер обмена
- */
 export async function copyInviteCode(code: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(code);
