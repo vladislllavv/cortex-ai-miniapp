@@ -23,7 +23,6 @@ export default function App() {
       const tg = (window as any).Telegram?.WebApp;
       if (tg) { tg.ready(); tg.expand(); }
     } catch {}
-
     const fixHeight = () => {
       document.documentElement.style.setProperty(
         "--vh",
@@ -38,10 +37,10 @@ export default function App() {
   }, []);
 
   const tabs = [
-    { id: "home" as Tab, icon: Home,          label: ru ? "Сегодня"  : "Today"    },
-    { id: "plan" as Tab, icon: Calendar,      label: ru ? "План"     : "Plan"     },
-    { id: "ai"   as Tab, icon: Bot,           label: "AI"                          },
-    { id: "more" as Tab, icon: MoreHorizontal, label: ru ? "Ещё"     : "More"     },
+    { id: "home" as Tab, icon: Home,           label: ru ? "Сегодня" : "Today" },
+    { id: "plan" as Tab, icon: Calendar,       label: ru ? "План"    : "Plan"  },
+    { id: "ai"   as Tab, icon: Bot,            label: "AI"                      },
+    { id: "more" as Tab, icon: MoreHorizontal, label: ru ? "Ещё"     : "More"  },
   ];
 
   return (
@@ -54,10 +53,17 @@ export default function App() {
           input, textarea, select { font-size:16px !important; }
           @keyframes bounce { 0%,100%{transform:translateY(0);opacity:.4} 50%{transform:translateY(-4px);opacity:1} }
           @keyframes pulse-dot { 0%,100%{opacity:.4;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
+          @keyframes ghost-float {
+            0%,100% { transform: translateY(0px) rotate(-2deg); }
+            50%      { transform: translateY(-8px) rotate(2deg); }
+          }
+          @keyframes ghost-glow {
+            0%,100% { opacity: 0.15; transform: scale(1); }
+            50%      { opacity: 0.35; transform: scale(1.08); }
+          }
           textarea::placeholder, input::placeholder { color:rgba(255,255,255,.3); }
           ::-webkit-scrollbar { width:0; height:0; }
         `}</style>
-
         <div
           style={{
             position: "fixed",
@@ -75,20 +81,23 @@ export default function App() {
           <div
             style={{
               flex: 1,
-              overflowY: "auto",
+              overflowY: tab === "ai" ? "hidden" : "auto",
               overflowX: "hidden",
               WebkitOverflowScrolling: "touch" as any,
-              paddingBottom: "68px",
+              paddingBottom: tab === "ai" ? "0px" : "68px",
               minHeight: 0,
             }}
           >
             <div
               style={{
-                padding: "12px 16px 16px",
+                padding: tab === "ai" ? "12px 16px 0" : "12px 16px 16px",
                 maxWidth: "480px",
                 margin: "0 auto",
                 width: "100%",
                 boxSizing: "border-box",
+                height: tab === "ai" ? "100%" : "auto",
+                display: tab === "ai" ? "flex" : "block",
+                flexDirection: tab === "ai" ? "column" : undefined,
               }}
             >
               {/* WorkspaceBar — только на главной и плане */}
