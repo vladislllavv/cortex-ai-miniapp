@@ -5,6 +5,7 @@ import { usePersistTasks, getTelegramUserId } from "@/lib/store";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { db } from "@/lib/firebase";
 import { doc, setDoc, getDoc } from "firebase/firestore";
+import { paths, PERSONAL_WORKSPACE_ID } from "@/lib/workspacePaths";
 
 async function registerUserOnOpen() {
   try {
@@ -14,7 +15,7 @@ async function registerUserOnOpen() {
     if (!user?.id) return;
     const userId = String(user.id);
     await setDoc(
-      doc(db, "users", userId),
+      doc(db, paths.user(userId)),
       {
         userId,
         chatId: userId,
@@ -38,7 +39,7 @@ async function checkAndRequestWriteAccess() {
     if (!user?.id) return;
     const userId = String(user.id);
     const snap = await getDoc(
-      doc(db, "users", userId, "settings", "motivation")
+      doc(db, paths.motivationSettings(userId))
     );
     if (!snap.exists()) return;
     const s = snap.data();
@@ -46,7 +47,7 @@ async function checkAndRequestWriteAccess() {
       tg.requestWriteAccess((granted: boolean) => {
         if (!granted) {
           setDoc(
-            doc(db, "users", userId, "settings", "motivation"),
+            doc(db, paths.motivationSettings(userId)),
             { enabled: false },
             { merge: true }
           ).catch(() => {});
@@ -56,36 +57,57 @@ async function checkAndRequestWriteAccess() {
   } catch {}
 }
 
+function parseStartParam(): string | null {
+  try {
+    const tg = (window as any).Telegram?.WebApp;
+    const startParam = tg?.initDataUnsafe?.start_param;
+    if (startParam && startParam.startsWith("w=")) {
+      return startParam.replace("w=", "");
+    }
+  } catch {}
+  return null;
+}
+
 function TelegramProviderInner({ children }: PropsWithChildren) {
-  const { loadWorkspaces } = useWorkspace();
+  const { loadWorkspaces, setActiveWorkspaceId } = useWorkspace();
   usePersistTasks();
 
   useEffect(() => {
     setupTelegram();
     initLanguageFromStorage();
-    registerUserOnOpen().then(() => checkAndRequestWriteAccess());
 
     const userId = getTelegramUserId();
+
+    registerUserOnOpen().then(() =>
+      checkAndRequestWriteAccess()
+    );
+
     if (userId !== "unknown") {
       loadWorkspaces(userId);
     }
 
-    // Deep link: start_param = workspace id
-    try {
-      const tg = (window as any).Telegram?.WebApp;
-      const startParam = tg?.initDataUnsafe?.start_param;
-      if (startParam && startParam.startsWith("w=")) {
-        const wsId = startParam.replace("w=", "");
-        if (wsId) {
-          localStorage.setItem("cortex-active-workspace", wsId);
-        }
+    // Deep link: открыть конкретный workspace
+    const wsId = parseStartParam();
+    if (wsId) {
+      setActiveWorkspaceId(wsId);
+      if (userId !== "unknown") {
+        import("@/lib/store").then(({ useTaskStore }) => {
+          useTaskStore.getState().setActiveWorkspaceId(wsId);
+          useTaskStore
+            .getState()
+            .loadUserData(userId, wsId);
+        });
       }
-    } catch {}
+    }
   }, []);
 
   return <>{children}</>;
 }
 
-export default function TelegramProvider({ children }: PropsWithChildren) {
-  return <TelegramProviderInner>{children}</TelegramProviderInner>;
+export default function TelegramProvider({
+  children,
+}: PropsWithChildren) {
+  return (
+    <TelegramProviderInner>{children}</TelegramProviderInner>
+  );
 }
