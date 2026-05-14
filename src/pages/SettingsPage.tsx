@@ -8,16 +8,20 @@ import {
 } from "@/lib/store";
 import { THEMES } from "@/lib/theme";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useState, useEffect, useRef } from "react";
 import {
   CheckCircle, XCircle, Star, Trash2,
-  Globe, Bell, Shield, Plus, Edit2, X, Palette, Check,
+  Globe, Bell, Shield, Plus, Edit2, X,
+  Palette, Check, Users, Crown,
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import {
   doc, getDoc, setDoc,
-  collection, getDocs, deleteDoc, writeBatch, query, where,
+  collection, getDocs, deleteDoc,
+  writeBatch, query, where,
 } from "firebase/firestore";
+import { paths } from "@/lib/workspacePaths";
 
 interface MotivationSettings {
   enabled: boolean;
@@ -57,9 +61,14 @@ export default function SettingsPage() {
   const tasks = useTaskStore((state) => state.tasks);
   const categories = useTaskStore((state) => state.categories);
   const addCategory = useTaskStore((state) => state.addCategory);
-  const updateCategory = useTaskStore((state) => state.updateCategory);
-  const deleteCategory = useTaskStore((state) => state.deleteCategory);
+  const updateCategory = useTaskStore(
+    (state) => state.updateCategory
+  );
+  const deleteCategory = useTaskStore(
+    (state) => state.deleteCategory
+  );
   const { theme, setTheme } = useTheme();
+  const { workspaces, activeWorkspace, role } = useWorkspace();
   const ru = language === "ru";
 
   const [subInfo, setSubInfo] = useState<{
@@ -73,7 +82,9 @@ export default function SettingsPage() {
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState("#3b82f6");
   const [newCatIcon, setNewCatIcon] = useState("📁");
-  const [editingCat, setEditingCat] = useState<CustomCategory | null>(null);
+  const [editingCat, setEditingCat] = useState<CustomCategory | null>(
+    null
+  );
   const [themeSaving, setThemeSaving] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
 
@@ -104,24 +115,19 @@ export default function SettingsPage() {
       })
       .catch(() => setSubLoading(false));
 
-    if (id && id !== "unknown") {
-      loadMotivationSettings(id);
-    } else {
-      setMotivationLoading(false);
-    }
+    if (id && id !== "unknown") loadMotivationSettingsFn(id);
+    else setMotivationLoading(false);
   }, []);
 
-  async function loadMotivationSettings(uid: string) {
+  async function loadMotivationSettingsFn(uid: string) {
     try {
       const snap = await getDoc(
-        doc(db, "users", uid, "settings", "motivation")
+        doc(db, paths.motivationSettings(uid))
       );
-      if (snap.exists()) {
-        const data = snap.data() as MotivationSettings;
-        setMotivationSettings(data);
-      }
+      if (snap.exists())
+        setMotivationSettings(snap.data() as MotivationSettings);
     } catch (e) {
-      console.error("Failed to load motivation settings:", e);
+      console.error("loadMotivation:", e);
     } finally {
       setMotivationLoading(false);
     }
@@ -139,52 +145,46 @@ export default function SettingsPage() {
             enabled: true,
           };
           setMotivationSettings(newSettings);
-          if (userId && userId !== "unknown") {
-            await saveMotivationSettings(userId, newSettings);
-          }
+          if (userId && userId !== "unknown")
+            await saveMotivationSettingsFn(userId, newSettings);
           tg.showAlert(
             ru
-              ? "✅ Мотивация включена!\n\nКаждый день буду присылать тебе мотивирующие сообщения."
+              ? "✅ Мотивация включена!\n\nКаждый день буду присылать мотивирующие сообщения."
               : "✅ Motivation enabled!\n\nI'll send you motivational messages every day."
           );
         } else {
           tg.showAlert(
             ru
-              ? "❌ Доступ отклонён. Бот не сможет присылать уведомления."
-              : "❌ Access denied. Bot cannot send notifications."
+              ? "❌ Доступ отклонён."
+              : "❌ Access denied."
           );
         }
         setMotivationSaving(false);
       });
     } catch (e) {
-      console.error("requestWriteAccess error:", e);
+      console.error("requestWriteAccess:", e);
       setMotivationSaving(false);
     }
   }
 
-  async function saveMotivationSettings(
+  async function saveMotivationSettingsFn(
     uid: string,
     settings: MotivationSettings
   ) {
     try {
-      await setDoc(
-        doc(db, "users", uid, "settings", "motivation"),
-        settings
-      );
+      await setDoc(doc(db, paths.motivationSettings(uid)), settings);
     } catch (e) {
-      console.error("Failed to save motivation settings:", e);
+      console.error("saveMotivation:", e);
     }
   }
 
-  async function updateMotivationSetting<K extends keyof MotivationSettings>(
-    key: K,
-    value: MotivationSettings[K]
-  ) {
+  async function updateMotivationSetting<
+    K extends keyof MotivationSettings
+  >(key: K, value: MotivationSettings[K]) {
     const newSettings = { ...motivationSettings, [key]: value };
     setMotivationSettings(newSettings);
-    if (userId && userId !== "unknown") {
-      await saveMotivationSettings(userId, newSettings);
-    }
+    if (userId && userId !== "unknown")
+      await saveMotivationSettingsFn(userId, newSettings);
   }
 
   async function disableMotivation() {
@@ -193,9 +193,8 @@ export default function SettingsPage() {
       enabled: false,
     };
     setMotivationSettings(newSettings);
-    if (userId && userId !== "unknown") {
-      await saveMotivationSettings(userId, newSettings);
-    }
+    if (userId && userId !== "unknown")
+      await saveMotivationSettingsFn(userId, newSettings);
   }
 
   useEffect(() => {
@@ -252,8 +251,14 @@ export default function SettingsPage() {
   const openSubscribe = () => {
     const tg = (window as any).Telegram?.WebApp;
     if (tg?.openTelegramLink)
-      tg.openTelegramLink("https://t.me/aiplannerrubot?start=subscribe");
-    else window.open("https://t.me/aiplannerrubot?start=subscribe", "_blank");
+      tg.openTelegramLink(
+        "https://t.me/aiplannerrubot?start=subscribe"
+      );
+    else
+      window.open(
+        "https://t.me/aiplannerrubot?start=subscribe",
+        "_blank"
+      );
   };
 
   const openChannel = () => {
@@ -263,7 +268,6 @@ export default function SettingsPage() {
     else window.open("https://t.me/miniapcortexai", "_blank");
   };
 
-  // ✅ ИСПРАВЛЕНИЕ: удаляем из Firebase + localStorage + корневой /tasks
   const handleDeleteAllTasks = () => {
     const tg = (window as any).Telegram?.WebApp;
     tg?.showConfirm(
@@ -275,32 +279,36 @@ export default function SettingsPage() {
         setDeletingAll(true);
         try {
           const uid = getTelegramUserId();
-
           if (uid !== "unknown") {
-            // 1. Удаляем из users/{uid}/tasks
-            const userTasksSnap = await getDocs(
-              collection(db, "users", uid, "tasks")
+            // Удаляем из workspace
+            const workspaceId =
+              localStorage.getItem("cortex-active-workspace") ||
+              "personal";
+            const wsTasksSnap = await getDocs(
+              collection(
+                db,
+                paths.tasks(uid, workspaceId)
+              )
             );
-            const batch1 = writeBatch(db);
-            userTasksSnap.forEach((d) => batch1.delete(d.ref));
-            if (!userTasksSnap.empty) await batch1.commit();
+            const b1 = writeBatch(db);
+            wsTasksSnap.forEach((d) => b1.delete(d.ref));
+            if (!wsTasksSnap.empty) await b1.commit();
 
-            // 2. Удаляем из корневой /tasks (бот-коллекция)
-            const botTasksSnap = await getDocs(
-              query(collection(db, "tasks"), where("userId", "==", uid))
+            // Удаляем из бот-коллекции
+            const botSnap = await getDocs(
+              query(
+                collection(db, paths.botTasks()),
+                where("userId", "==", uid)
+              )
             );
-            const batch2 = writeBatch(db);
-            botTasksSnap.forEach((d) => batch2.delete(d.ref));
-            if (!botTasksSnap.empty) await batch2.commit();
+            const b2 = writeBatch(db);
+            botSnap.forEach((d) => b2.delete(d.ref));
+            if (!botSnap.empty) await b2.commit();
           }
-
-          // 3. Очищаем localStorage
           localStorage.removeItem("cortex-tasks");
-
-          // 4. Обновляем store
           useTaskStore.setState({ tasks: [] });
         } catch (e) {
-          console.error("Delete all tasks error:", e);
+          console.error("Delete all:", e);
         } finally {
           setDeletingAll(false);
         }
@@ -371,8 +379,12 @@ export default function SettingsPage() {
                 }}
               >
                 {subInfo.isActive
-                  ? ru ? "Подписка активна" : "Subscription active"
-                  : ru ? "Нет подписки" : "No subscription"}
+                  ? ru
+                    ? "Подписка активна"
+                    : "Subscription active"
+                  : ru
+                  ? "Нет подписки"
+                  : "No subscription"}
               </p>
             </div>
             {subInfo.isActive && subInfo.expiresAt && (
@@ -384,8 +396,12 @@ export default function SettingsPage() {
                 }}
               >
                 {ru
-                  ? `До: ${subInfo.expiresAt.toLocaleDateString("ru-RU")} (${subInfo.daysLeft} дн.)`
-                  : `Until: ${subInfo.expiresAt.toLocaleDateString("en-US")} (${subInfo.daysLeft} days)`}
+                  ? `До: ${subInfo.expiresAt.toLocaleDateString(
+                      "ru-RU"
+                    )} (${subInfo.daysLeft} дн.)`
+                  : `Until: ${subInfo.expiresAt.toLocaleDateString(
+                      "en-US"
+                    )} (${subInfo.daysLeft} days)`}
               </p>
             )}
             {!subInfo.isActive && (
@@ -428,16 +444,190 @@ export default function SettingsPage() {
                 alignItems: "center",
                 justifyContent: "center",
                 gap: "8px",
-                transition: "background-color 0.3s",
               }}
             >
-              <Star size={16} color={subInfo.isActive ? "#4ade80" : "white"} />
+              <Star
+                size={16}
+                color={subInfo.isActive ? "#4ade80" : "white"}
+              />
               {subInfo.isActive
-                ? ru ? "Продлить подписку" : "Renew"
-                : ru ? "Оформить подписку" : "Get subscription"}
+                ? ru
+                  ? "Продлить подписку"
+                  : "Renew"
+                : ru
+                ? "Оформить подписку"
+                : "Get subscription"}
             </button>
           </>
         )}
+      </div>
+
+      {/* ==================== WORKSPACE ==================== */}
+      <SectionTitle>
+        <Users size={13} style={{ marginRight: "5px" }} />
+        {ru ? "Рабочее пространство" : "Workspace"}
+      </SectionTitle>
+      <div
+        style={{
+          backgroundColor: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: "16px",
+          padding: "14px 16px",
+          marginBottom: "20px",
+        }}
+      >
+        {/* Текущий workspace */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            marginBottom: "12px",
+          }}
+        >
+          <span style={{ fontSize: "24px" }}>
+            {activeWorkspace?.emoji || "👤"}
+          </span>
+          <div style={{ flex: 1 }}>
+            <p
+              style={{
+                fontSize: "14px",
+                fontWeight: 600,
+                color: "white",
+                margin: 0,
+              }}
+            >
+              {activeWorkspace?.name ||
+                (ru ? "Личное" : "Personal")}
+            </p>
+            <p
+              style={{
+                fontSize: "11px",
+                color: "rgba(255,255,255,0.4)",
+                margin: 0,
+              }}
+            >
+              {activeWorkspace?.type === "personal"
+                ? ru
+                  ? "Личное пространство"
+                  : "Personal workspace"
+                : ru
+                ? "Командное пространство"
+                : "Team workspace"}
+            </p>
+          </div>
+          {role === "owner" && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                backgroundColor: "rgba(251,191,36,0.15)",
+                border: "1px solid rgba(251,191,36,0.3)",
+                borderRadius: "8px",
+                padding: "3px 8px",
+              }}
+            >
+              <Crown size={12} color="#fbbf24" />
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: "#fbbf24",
+                  fontWeight: 600,
+                }}
+              >
+                {ru ? "Владелец" : "Owner"}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Список всех workspaces */}
+        {workspaces.length > 1 && (
+          <div
+            style={{
+              borderTop: "1px solid rgba(255,255,255,0.06)",
+              paddingTop: "10px",
+              marginBottom: "10px",
+            }}
+          >
+            <p
+              style={{
+                fontSize: "11px",
+                color: "rgba(255,255,255,0.3)",
+                margin: "0 0 8px 0",
+              }}
+            >
+              {ru ? "Все пространства" : "All workspaces"}
+            </p>
+            {workspaces.map((ws) => (
+              <div
+                key={ws.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "6px 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.04)",
+                }}
+              >
+                <span style={{ fontSize: "16px" }}>
+                  {ws.emoji || "📁"}
+                </span>
+                <span
+                  style={{
+                    fontSize: "13px",
+                    color: "rgba(255,255,255,0.75)",
+                    flex: 1,
+                  }}
+                >
+                  {ws.name}
+                </span>
+                <span
+                  style={{
+                    fontSize: "10px",
+                    color: "rgba(255,255,255,0.3)",
+                    backgroundColor: "rgba(255,255,255,0.06)",
+                    padding: "2px 6px",
+                    borderRadius: "6px",
+                  }}
+                >
+                  {ws.type === "personal"
+                    ? ru
+                      ? "Личное"
+                      : "Personal"
+                    : ru
+                    ? "Команда"
+                    : "Team"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Подсказка про команды */}
+        <div
+          style={{
+            backgroundColor: "rgba(99,102,241,0.08)",
+            border: "1px solid rgba(99,102,241,0.2)",
+            borderRadius: "10px",
+            padding: "10px 12px",
+          }}
+        >
+          <p
+            style={{
+              fontSize: "12px",
+              color: "rgba(255,255,255,0.5)",
+              margin: 0,
+              lineHeight: 1.5,
+            }}
+          >
+            🚀{" "}
+            {ru
+              ? "Командные пространства скоро — создавай общие задачи и приглашай участников."
+              : "Team workspaces coming soon — create shared tasks and invite members."}
+          </p>
+        </div>
       </div>
 
       {/* ==================== МОТИВАЦИЯ ==================== */}
@@ -472,37 +662,38 @@ export default function SettingsPage() {
           <>
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: motivationSettings.enabled ? "14px" : "12px",
+                marginBottom: motivationSettings.enabled
+                  ? "14px"
+                  : "12px",
               }}
             >
-              <div>
-                <p
-                  style={{
-                    fontSize: "14px",
-                    fontWeight: 600,
-                    color: "white",
-                    margin: "0 0 2px 0",
-                  }}
-                >
-                  {motivationSettings.enabled
-                    ? ru ? "✅ Мотивация включена" : "✅ Motivation enabled"
-                    : ru ? "Мотивационные уведомления" : "Motivational notifications"}
-                </p>
-                <p
-                  style={{
-                    fontSize: "12px",
-                    color: "rgba(255,255,255,0.4)",
-                    margin: 0,
-                  }}
-                >
-                  {ru
-                    ? "Бот присылает сообщения по расписанию"
-                    : "Bot sends messages on schedule"}
-                </p>
-              </div>
+              <p
+                style={{
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  color: "white",
+                  margin: "0 0 2px 0",
+                }}
+              >
+                {motivationSettings.enabled
+                  ? ru
+                    ? "✅ Мотивация включена"
+                    : "✅ Motivation enabled"
+                  : ru
+                  ? "Мотивационные уведомления"
+                  : "Motivational notifications"}
+              </p>
+              <p
+                style={{
+                  fontSize: "12px",
+                  color: "rgba(255,255,255,0.4)",
+                  margin: 0,
+                }}
+              >
+                {ru
+                  ? "Бот присылает сообщения по расписанию"
+                  : "Bot sends messages on schedule"}
+              </p>
             </div>
 
             {motivationSettings.enabled && (
@@ -522,14 +713,28 @@ export default function SettingsPage() {
                   <div style={{ display: "flex", gap: "6px" }}>
                     {(
                       [
-                        { value: "soft",   label: ru ? "🌸 Мягко"     : "🌸 Soft"   },
-                        { value: "normal", label: ru ? "💪 Нормально" : "💪 Normal" },
-                        { value: "hard",   label: ru ? "🔥 Жёстко"    : "🔥 Hard"   },
+                        {
+                          value: "soft",
+                          label: ru ? "🌸 Мягко" : "🌸 Soft",
+                        },
+                        {
+                          value: "normal",
+                          label: ru ? "💪 Норм" : "💪 Normal",
+                        },
+                        {
+                          value: "hard",
+                          label: ru ? "🔥 Жёстко" : "🔥 Hard",
+                        },
                       ] as const
                     ).map((opt) => (
                       <button
                         key={opt.value}
-                        onClick={() => updateMotivationSetting("mode", opt.value)}
+                        onClick={() =>
+                          updateMotivationSetting(
+                            "mode",
+                            opt.value
+                          )
+                        }
                         style={{
                           flex: 1,
                           height: "36px",
@@ -548,7 +753,9 @@ export default function SettingsPage() {
                               : "rgba(255,255,255,0.5)",
                           fontSize: "11px",
                           fontWeight:
-                            motivationSettings.mode === opt.value ? 600 : 400,
+                            motivationSettings.mode === opt.value
+                              ? 600
+                              : 400,
                           cursor: "pointer",
                         }}
                       >
@@ -570,7 +777,10 @@ export default function SettingsPage() {
                   >
                     {ru ? "Раз в день" : "Times per day"}:{" "}
                     <span
-                      style={{ color: theme.primary, fontWeight: 700 }}
+                      style={{
+                        color: theme.primary,
+                        fontWeight: 700,
+                      }}
                     >
                       {motivationSettings.timesPerDay}×
                     </span>
@@ -580,7 +790,10 @@ export default function SettingsPage() {
                       <button
                         key={n}
                         onClick={() =>
-                          updateMotivationSetting("timesPerDay", n)
+                          updateMotivationSetting(
+                            "timesPerDay",
+                            n
+                          )
                         }
                         style={{
                           flex: 1,
@@ -600,7 +813,9 @@ export default function SettingsPage() {
                               : "rgba(255,255,255,0.5)",
                           fontSize: "13px",
                           fontWeight:
-                            motivationSettings.timesPerDay === n ? 700 : 400,
+                            motivationSettings.timesPerDay === n
+                              ? 700
+                              : 400,
                           cursor: "pointer",
                         }}
                       >
@@ -622,8 +837,8 @@ export default function SettingsPage() {
                   }}
                 >
                   {ru
-                    ? "Проверить: напиши /test_motivation боту @aiplannerrubot"
-                    : "Test: send /test_motivation to @aiplannerrubot"}
+                    ? "Проверить: /test_motivation боту @aiplannerrubot"
+                    : "Test: /test_motivation to @aiplannerrubot"}
                 </div>
 
                 <button
@@ -656,9 +871,15 @@ export default function SettingsPage() {
                   }}
                 >
                   {[
-                    ru ? "🌸 Мягкий, 💪 нормальный или 🔥 жёсткий стиль" : "🌸 Soft, 💪 normal or 🔥 hard style",
-                    ru ? "⏰ От 1 до 5 сообщений в день" : "⏰ From 1 to 5 messages per day",
-                    ru ? "🤖 Персонализированные под твои задачи" : "🤖 Personalized for your tasks",
+                    ru
+                      ? "🌸 Мягкий, 💪 нормальный или 🔥 жёсткий стиль"
+                      : "🌸 Soft, 💪 normal or 🔥 hard style",
+                    ru
+                      ? "⏰ От 1 до 5 сообщений в день"
+                      : "⏰ From 1 to 5 messages per day",
+                    ru
+                      ? "🤖 Персонализированные под задачи"
+                      : "🤖 Personalized for your tasks",
                   ].map((f) => (
                     <p
                       key={f}
@@ -686,7 +907,9 @@ export default function SettingsPage() {
                     color: "white",
                     fontSize: "14px",
                     fontWeight: 600,
-                    cursor: motivationSaving ? "not-allowed" : "pointer",
+                    cursor: motivationSaving
+                      ? "not-allowed"
+                      : "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -695,8 +918,12 @@ export default function SettingsPage() {
                 >
                   <Bell size={16} />
                   {motivationSaving
-                    ? ru ? "Запрашиваем доступ..." : "Requesting access..."
-                    : ru ? "Включить мотивацию" : "Enable motivation"}
+                    ? ru
+                      ? "Запрашиваем доступ..."
+                      : "Requesting..."
+                    : ru
+                    ? "Включить мотивацию"
+                    : "Enable motivation"}
                 </button>
                 <p
                   style={{
@@ -707,8 +934,8 @@ export default function SettingsPage() {
                   }}
                 >
                   {ru
-                    ? "Потребуется разрешение на отправку сообщений от бота"
-                    : "Bot needs permission to send you messages"}
+                    ? "Потребуется разрешение от бота"
+                    : "Bot needs permission to send messages"}
                 </p>
               </>
             )}
@@ -761,7 +988,9 @@ export default function SettingsPage() {
                     : "2px solid rgba(255,255,255,0.1)",
                   padding: "10px 6px",
                   cursor: "pointer",
-                  backgroundColor: isActive ? `${t.primary}20` : t.bg,
+                  backgroundColor: isActive
+                    ? `${t.primary}20`
+                    : t.bg,
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
@@ -808,13 +1037,14 @@ export default function SettingsPage() {
                     border: isActive
                       ? "2px solid white"
                       : "2px solid transparent",
-                    transition: "border 0.2s",
                   }}
                 />
                 <p
                   style={{
                     fontSize: "10px",
-                    color: isActive ? t.primary : "rgba(255,255,255,0.5)",
+                    color: isActive
+                      ? t.primary
+                      : "rgba(255,255,255,0.5)",
                     margin: 0,
                     fontWeight: isActive ? 700 : 400,
                     textAlign: "center" as const,
@@ -854,8 +1084,8 @@ export default function SettingsPage() {
         }}
       >
         {ru
-          ? "Тема синхронизируется между всеми устройствами"
-          : "Theme syncs across all your devices"}
+          ? "Тема синхронизируется между устройствами"
+          : "Theme syncs across devices"}
       </p>
 
       {/* ==================== TELEGRAM КАНАЛ ==================== */}
@@ -874,13 +1104,11 @@ export default function SettingsPage() {
           cursor: "pointer",
           display: "flex",
           alignItems: "center",
-          justifyContent: "flex-start",
           gap: "12px",
           paddingLeft: "16px",
           paddingRight: "16px",
           marginBottom: "20px",
           boxSizing: "border-box" as const,
-          transition: "all 0.3s",
         }}
       >
         <div
@@ -1034,9 +1262,9 @@ export default function SettingsPage() {
         }}
       >
         {[
-          { label: ru ? "Всего"     : "Total",  value: tasks.length },
-          { label: ru ? "Активных"  : "Active", value: activeTasks  },
-          { label: ru ? "Выполнено" : "Done",   value: doneTasks    },
+          { label: ru ? "Всего" : "Total", value: tasks.length },
+          { label: ru ? "Активных" : "Active", value: activeTasks },
+          { label: ru ? "Выполнено" : "Done", value: doneTasks },
         ].map(({ label, value }) => (
           <div
             key={label}
@@ -1105,7 +1333,9 @@ export default function SettingsPage() {
               fontSize: "14px",
               fontWeight: language === code ? 600 : 400,
               color:
-                language === code ? theme.primary : "rgba(255,255,255,0.6)",
+                language === code
+                  ? theme.primary
+                  : "rgba(255,255,255,0.6)",
               cursor: "pointer",
               transition: "all 0.2s",
             }}
@@ -1134,6 +1364,7 @@ export default function SettingsPage() {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
+            marginBottom: workspaces.length > 0 ? "10px" : 0,
           }}
         >
           <span
@@ -1151,6 +1382,33 @@ export default function SettingsPage() {
             {userId || "—"}
           </span>
         </div>
+        {workspaces.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "13px",
+                color: "rgba(255,255,255,0.4)",
+              }}
+            >
+              {ru ? "Пространств" : "Workspaces"}
+            </span>
+            <span
+              style={{
+                fontSize: "13px",
+                fontWeight: 600,
+                color: "rgba(255,255,255,0.7)",
+              }}
+            >
+              {workspaces.length}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ==================== ОПАСНАЯ ЗОНА ==================== */}
@@ -1158,8 +1416,6 @@ export default function SettingsPage() {
         <Trash2 size={13} style={{ marginRight: "5px" }} />
         {ru ? "Опасная зона" : "Danger zone"}
       </SectionTitle>
-
-      {/* ✅ ИСПРАВЛЕНИЕ: удаляем из Firebase + localStorage */}
       <button
         onClick={handleDeleteAllTasks}
         disabled={deletingAll}
@@ -1171,7 +1427,9 @@ export default function SettingsPage() {
           backgroundColor: "rgba(239,68,68,0.08)",
           fontSize: "14px",
           fontWeight: 500,
-          color: deletingAll ? "rgba(248,113,113,0.5)" : "#f87171",
+          color: deletingAll
+            ? "rgba(248,113,113,0.5)"
+            : "#f87171",
           cursor: deletingAll ? "not-allowed" : "pointer",
           display: "flex",
           alignItems: "center",
@@ -1181,8 +1439,12 @@ export default function SettingsPage() {
       >
         <Trash2 size={16} />
         {deletingAll
-          ? ru ? "Удаляем..." : "Deleting..."
-          : ru ? "Удалить все задачи" : "Delete all tasks"}
+          ? ru
+            ? "Удаляем..."
+            : "Deleting..."
+          : ru
+          ? "Удалить все задачи"
+          : "Delete all tasks"}
       </button>
 
       {/* ==================== МОДАЛКА КАТЕГОРИЙ ==================== */}
@@ -1199,7 +1461,8 @@ export default function SettingsPage() {
             padding: "16px",
           }}
           onClick={(e) => {
-            if (e.target === e.currentTarget) setShowAddCategory(false);
+            if (e.target === e.currentTarget)
+              setShowAddCategory(false);
           }}
         >
           <div
@@ -1234,8 +1497,12 @@ export default function SettingsPage() {
                 }}
               >
                 {editingCat
-                  ? ru ? "Изменить раздел" : "Edit section"
-                  : ru ? "Новый раздел" : "New section"}
+                  ? ru
+                    ? "Изменить раздел"
+                    : "Edit section"
+                  : ru
+                  ? "Новый раздел"
+                  : "New section"}
               </p>
               <button
                 onClick={() => setShowAddCategory(false)}
@@ -1260,7 +1527,11 @@ export default function SettingsPage() {
                 {ru ? "Иконка" : "Icon"}
               </p>
               <div
-                style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}
+                style={{
+                  display: "flex",
+                  gap: "6px",
+                  flexWrap: "wrap",
+                }}
               >
                 {[
                   "📁","🎂","🌴","💳","🏠","💊",
@@ -1306,8 +1577,12 @@ export default function SettingsPage() {
                 ref={nameInputRef}
                 value={newCatName}
                 onChange={(e) => setNewCatName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddCategory()}
-                placeholder={ru ? "Название раздела" : "Section name"}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && handleAddCategory()
+                }
+                placeholder={
+                  ru ? "Название раздела" : "Section name"
+                }
                 style={{
                   display: "block",
                   width: "100%",
@@ -1337,7 +1612,11 @@ export default function SettingsPage() {
                 {ru ? "Цвет" : "Color"}
               </p>
               <div
-                style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                }}
               >
                 {[
                   "#3b82f6","#ef4444","#f59e0b","#22c55e",
@@ -1380,8 +1659,12 @@ export default function SettingsPage() {
               }}
             >
               {editingCat
-                ? ru ? "Сохранить" : "Save"
-                : ru ? "Создать раздел" : "Create section"}
+                ? ru
+                  ? "Сохранить"
+                  : "Save"
+                : ru
+                ? "Создать раздел"
+                : "Create section"}
             </button>
           </div>
         </div>
