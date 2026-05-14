@@ -11,7 +11,7 @@ type HapticStyle = "light" | "medium" | "heavy" | "success" | "error" | "warning
 // ═══════════════════════════════════════════════════════════════════
 // НАСТРОЙКИ БОТА — ЗАМЕНИ НА СВОИ
 // ═══════════════════════════════════════════════════════════════════
-export const BOT_USERNAME = "CortexAITaskBot"; // имя бота без @
+export const BOT_USERNAME = "CortexAITaskBot"; // aiplannerrubot
 export const APP_NAME = "app";                 // short_name Mini App из @BotFather
 // ═══════════════════════════════════════════════════════════════════
 
