@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
 import { User, Send, Trash2, ChevronDown } from "lucide-react";
-import { useAuthStore } from "@/lib/authStore";
 import { db } from "@/lib/firebase";
 import {
   collection,
@@ -10,12 +9,13 @@ import {
   query,
   orderBy,
   onSnapshot,
-  serverTimestamp,
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
 } from "firebase/firestore";
 import { callGemini } from "@/lib/gemini";
+import { getTelegramUser } from "@/lib/telegram";
 
 interface Message {
   id: string;
@@ -29,7 +29,6 @@ interface CoachPageProps {
   onOpenProfile?: () => void;
 }
 
-// ─── Анимированный аватар-привидение ───────────────────────────────────────
 function CoachAvatar({ size = 90 }: { size?: number }) {
   const { theme } = useTheme();
   return (
@@ -44,7 +43,6 @@ function CoachAvatar({ size = 90 }: { size?: number }) {
         justifyContent: "center",
       }}
     >
-      {/* Glow */}
       <div
         style={{
           position: "absolute",
@@ -55,7 +53,6 @@ function CoachAvatar({ size = 90 }: { size?: number }) {
           pointerEvents: "none",
         }}
       />
-      {/* Ghost emoji */}
       <div
         style={{
           fontSize: size * 0.72,
@@ -77,7 +74,9 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
   const language = useI18nStore((s) => s.language);
   const { theme } = useTheme();
   const ru = language === "ru";
-  const { user } = useAuthStore();
+
+  const tgUser = getTelegramUser();
+  const uid = tgUser?.id || "";
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -87,22 +86,33 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Загрузка имени пользователя
+  // Загрузка имени
   useEffect(() => {
-    if (!user?.uid) return;
-    getDoc(doc(db, "users", user.uid)).then((snap) => {
+    if (!uid) {
+      setUserName(tgUser?.first_name || tgUser?.username || "");
+      return;
+    }
+    getDoc(doc(db, "users", uid)).then((snap) => {
       if (snap.exists()) {
         const d = snap.data();
-        setUserName(d.displayName || d.name || "");
+        setUserName(
+          d.displayName ||
+            d.name ||
+            tgUser?.first_name ||
+            tgUser?.username ||
+            ""
+        );
+      } else {
+        setUserName(tgUser?.first_name || tgUser?.username || "");
       }
     });
-  }, [user?.uid]);
+  }, [uid]);
 
   // Подписка на сообщения
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!uid) return;
     const q = query(
-      collection(db, "users", user.uid, "coachMessages"),
+      collection(db, "users", uid, "coachMessages"),
       orderBy("ts", "asc")
     );
     const unsub = onSnapshot(q, (snap) => {
@@ -114,9 +124,8 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
       );
     });
     return unsub;
-  }, [user?.uid]);
+  }, [uid]);
 
-  // Автоскролл
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -132,12 +141,12 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || !user?.uid || loading) return;
+    if (!input.trim() || !uid || loading) return;
     const text = input.trim();
     setInput("");
     setLoading(true);
 
-    await addDoc(collection(db, "users", user.uid, "coachMessages"), {
+    await addDoc(collection(db, "users", uid, "coachMessages"), {
       role: "user",
       text,
       ts: Date.now(),
@@ -155,13 +164,13 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
 
       const reply = await callGemini(text, history, systemPrompt);
 
-      await addDoc(collection(db, "users", user.uid, "coachMessages"), {
+      await addDoc(collection(db, "users", uid, "coachMessages"), {
         role: "assistant",
         text: reply,
         ts: Date.now() + 1,
       });
     } catch {
-      await addDoc(collection(db, "users", user.uid, "coachMessages"), {
+      await addDoc(collection(db, "users", uid, "coachMessages"), {
         role: "assistant",
         text: ru
           ? "Произошла ошибка. Попробуй ещё раз."
@@ -174,12 +183,13 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
   };
 
   const clearHistory = async () => {
-    if (!user?.uid) return;
-    const q = query(collection(db, "users", user.uid, "coachMessages"));
-    const snap = await import("firebase/firestore").then(({ getDocs }) =>
-      getDocs(q)
+    if (!uid) return;
+    const snap = await getDocs(collection(db, "users", uid, "coachMessages"));
+    await Promise.all(
+      snap.docs.map((d) =>
+        deleteDoc(doc(db, "users", uid, "coachMessages", d.id))
+      )
     );
-    await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, "users", user.uid!, "coachMessages", d.id))));
   };
 
   const greeting = ru
@@ -197,7 +207,6 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
         paddingBottom: "68px",
       }}
     >
-      {/* ── Шапка с аватаром + кнопка Профиль ───────────────────── */}
       <div
         style={{
           display: "flex",
@@ -208,7 +217,6 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
           flexShrink: 0,
         }}
       >
-        {/* Левая часть: аватар + заголовок */}
         <div
           style={{
             display: "flex",
@@ -216,7 +224,6 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
             gap: "12px",
           }}
         >
-          {/* Аватар с отступом сверху чтобы glow не обрезался */}
           <div style={{ paddingTop: "8px", paddingBottom: "4px" }}>
             <CoachAvatar size={72} />
           </div>
@@ -243,9 +250,7 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
           </div>
         </div>
 
-        {/* Правая часть: кнопки */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          {/* Кнопка Профиль */}
           <button
             onClick={onOpenProfile}
             title={ru ? "Профиль" : "Profile"}
@@ -264,7 +269,6 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
             <User size={16} color="rgba(255,255,255,0.7)" />
           </button>
 
-          {/* Кнопка очистить */}
           {messages.length > 0 && (
             <button
               onClick={clearHistory}
@@ -287,7 +291,6 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
         </div>
       </div>
 
-      {/* ── Область сообщений ─────────────────────────────────────── */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -302,7 +305,6 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
           minHeight: 0,
         }}
       >
-        {/* Приветствие */}
         {messages.length === 0 && (
           <div
             style={{
@@ -366,7 +368,6 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
           </div>
         ))}
 
-        {/* Индикатор загрузки */}
         {loading && (
           <div style={{ display: "flex", justifyContent: "flex-start" }}>
             <div
@@ -399,7 +400,6 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Кнопка скролла вниз */}
       {showScrollBtn && (
         <button
           onClick={scrollToBottom}
@@ -424,7 +424,6 @@ export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
         </button>
       )}
 
-      {/* ── Поле ввода ───────────────────────────────────────────── */}
       <div
         style={{
           flexShrink: 0,
