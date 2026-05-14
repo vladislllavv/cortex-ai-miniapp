@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Send, ChevronDown, Trash2, Lock } from "lucide-react";
-import { useAuthStore } from "@/lib/authStore";
 import { db } from "@/lib/firebase";
 import {
   collection,
@@ -13,8 +12,10 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
 } from "firebase/firestore";
 import { callGemini } from "@/lib/gemini";
+import { getTelegramUser } from "@/lib/telegram";
 
 interface Message {
   id: string;
@@ -29,16 +30,15 @@ interface AiProcessPageProps {
 
 const MAX_FREE_MESSAGES = 10;
 
-// Путь к настройкам мотивации (единый!)
 const motivationPath = (uid: string) =>
   doc(db, "users", uid, "settings", "motivation");
 
 type MotivationMode = "soft" | "balanced" | "hard";
 
 const MOTIVATION_LABELS: Record<MotivationMode, { ru: string; en: string; emoji: string }> = {
-  soft:     { ru: "Мягкий",     en: "Soft",     emoji: "🌱" },
-  balanced: { ru: "Баланс",     en: "Balanced", emoji: "⚖️" },
-  hard:     { ru: "Жёсткий",   en: "Hard",     emoji: "💪" },
+  soft:     { ru: "Мягкий",   en: "Soft",     emoji: "🌱" },
+  balanced: { ru: "Баланс",   en: "Balanced", emoji: "⚖️" },
+  hard:     { ru: "Жёсткий",  en: "Hard",     emoji: "💪" },
 };
 
 function getSystemPrompt(mode: MotivationMode, ru: boolean, userName: string): string {
@@ -64,7 +64,9 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
   const language = useI18nStore((s) => s.language);
   const { theme } = useTheme();
   const ru = language === "ru";
-  const { user } = useAuthStore();
+
+  const tgUser = getTelegramUser();
+  const uid = tgUser?.id || "";
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -80,32 +82,43 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
 
   // Загрузка данных пользователя
   useEffect(() => {
-    if (!user?.uid) return;
-    getDoc(doc(db, "users", user.uid)).then((snap) => {
+    if (!uid) {
+      setUserName(tgUser?.first_name || tgUser?.username || "");
+      return;
+    }
+    getDoc(doc(db, "users", uid)).then((snap) => {
       if (snap.exists()) {
         const d = snap.data();
         setIsPro(!!d.isPro);
-        setUserName(d.displayName || d.name || "");
+        setUserName(
+          d.displayName ||
+            d.name ||
+            tgUser?.first_name ||
+            tgUser?.username ||
+            ""
+        );
+      } else {
+        setUserName(tgUser?.first_name || tgUser?.username || "");
       }
     });
-  }, [user?.uid]);
+  }, [uid]);
 
-  // Загрузка настроек мотивации (единый путь)
+  // Загрузка настроек мотивации
   useEffect(() => {
-    if (!user?.uid) return;
-    getDoc(motivationPath(user.uid)).then((snap) => {
+    if (!uid) return;
+    getDoc(motivationPath(uid)).then((snap) => {
       if (snap.exists()) {
         const d = snap.data();
         if (d.mode) setMotivationMode(d.mode as MotivationMode);
       }
     });
-  }, [user?.uid]);
+  }, [uid]);
 
   // Подписка на сообщения
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!uid) return;
     const q = query(
-      collection(db, "users", user.uid, "aiMessages"),
+      collection(db, "users", uid, "aiMessages"),
       orderBy("ts", "asc")
     );
     const unsub = onSnapshot(q, (snap) => {
@@ -117,9 +130,8 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
       setMsgCount(msgs.filter((m) => m.role === "user").length);
     });
     return unsub;
-  }, [user?.uid]);
+  }, [uid]);
 
-  // Автоскролл
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -138,12 +150,12 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
   const mLabel = MOTIVATION_LABELS[motivationMode];
 
   const sendMessage = async () => {
-    if (!input.trim() || !user?.uid || loading || !canSend) return;
+    if (!input.trim() || !uid || loading || !canSend) return;
     const text = input.trim();
     setInput("");
     setLoading(true);
 
-    await addDoc(collection(db, "users", user.uid, "aiMessages"), {
+    await addDoc(collection(db, "users", uid, "aiMessages"), {
       role: "user",
       text,
       ts: Date.now(),
@@ -158,13 +170,13 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
       const systemPrompt = getSystemPrompt(motivationMode, ru, userName);
       const reply = await callGemini(text, history, systemPrompt);
 
-      await addDoc(collection(db, "users", user.uid, "aiMessages"), {
+      await addDoc(collection(db, "users", uid, "aiMessages"), {
         role: "assistant",
         text: reply,
         ts: Date.now() + 1,
       });
     } catch {
-      await addDoc(collection(db, "users", user.uid, "aiMessages"), {
+      await addDoc(collection(db, "users", uid, "aiMessages"), {
         role: "assistant",
         text: ru
           ? "Произошла ошибка. Попробуй ещё раз."
@@ -177,20 +189,17 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
   };
 
   const clearHistory = async () => {
-    if (!user?.uid) return;
-    const { getDocs } = await import("firebase/firestore");
-    const snap = await getDocs(
-      collection(db, "users", user.uid, "aiMessages")
-    );
+    if (!uid) return;
+    const snap = await getDocs(collection(db, "users", uid, "aiMessages"));
     await Promise.all(
       snap.docs.map((d) =>
-        deleteDoc(doc(db, "users", user.uid!, "aiMessages", d.id))
+        deleteDoc(doc(db, "users", uid, "aiMessages", d.id))
       )
     );
   };
 
   const DEFAULT_MESSAGE = ru
-    ? `Привет${userName ? ", " + userName : ""}! ⚡ Я твой AI-ассистент.\n\nМогу помочь:\n• 📋 Планировать задачи и день\n• ⏰ Управлять временем\n• 🎯 Ставить и достигать цели\n• 💡 Давать советы по продуктивности\n\nРежим мотивации: ${mLabel.emoji} ${ru ? mLabel.ru : mLabel.en}\nНастрой мотивацию в Ещё → Настройки`
+    ? `Привет${userName ? ", " + userName : ""}! ⚡ Я твой AI-ассистент.\n\nМогу помочь:\n• 📋 Планировать задачи и день\n• ⏰ Управлять временем\n• 🎯 Ставить и достигать цели\n• 💡 Давать советы по продуктивности\n\nРежим мотивации: ${mLabel.emoji} ${mLabel.ru}\nНастрой мотивацию в Ещё → Настройки`
     : `Hey${userName ? ", " + userName : ""}! ⚡ I'm your AI assistant.\n\nI can help:\n• 📋 Plan tasks and your day\n• ⏰ Manage your time\n• 🎯 Set and achieve goals\n• 💡 Give productivity tips\n\nMotivation mode: ${mLabel.emoji} ${mLabel.en}\nCustomize motivation in More → Settings`;
 
   return (
@@ -204,7 +213,6 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
         paddingBottom: "68px",
       }}
     >
-      {/* ── Шапка ─────────────────────────────────────────────────── */}
       <div
         style={{
           display: "flex",
@@ -225,7 +233,6 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
           >
             {ru ? "AI Ассистент" : "AI Assistant"}
           </p>
-          {/* Режим мотивации — только информационно, без кнопки настройки */}
           <p
             style={{
               fontSize: "11px",
@@ -244,7 +251,6 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
           </p>
         </div>
 
-        {/* Кнопка очистить (без шестерёнки!) */}
         {messages.length > 0 && (
           <button
             onClick={clearHistory}
@@ -266,7 +272,6 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
         )}
       </div>
 
-      {/* ── Лимит исчерпан ────────────────────────────────────────── */}
       {!canSend && (
         <div
           style={{
@@ -290,7 +295,6 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
         </div>
       )}
 
-      {/* ── Область сообщений ─────────────────────────────────────── */}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -305,7 +309,6 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
           minHeight: 0,
         }}
       >
-        {/* Приветствие */}
         {messages.length === 0 && (
           <div
             style={{
@@ -370,7 +373,6 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
           </div>
         ))}
 
-        {/* Индикатор загрузки */}
         {loading && (
           <div style={{ display: "flex", justifyContent: "flex-start" }}>
             <div
@@ -403,7 +405,6 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Кнопка скролла вниз */}
       {showScrollBtn && (
         <button
           onClick={scrollToBottom}
@@ -428,7 +429,6 @@ export default function AiProcessPage({ embedded }: AiProcessPageProps) {
         </button>
       )}
 
-      {/* ── Поле ввода ───────────────────────────────────────────── */}
       <div
         style={{
           flexShrink: 0,
