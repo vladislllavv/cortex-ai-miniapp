@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
-import { useAuthStore } from "@/lib/authStore";
 import { useTeamStore, Role } from "@/lib/teamStore";
 import {
   copyInviteCode,
@@ -12,8 +11,6 @@ import {
   tgConfirm,
   getTelegramUser,
 } from "@/lib/telegram";
-import { db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
 import {
   Plus,
   Users,
@@ -71,7 +68,11 @@ export default function TeamPage() {
   const language = useI18nStore((s) => s.language);
   const { theme } = useTheme();
   const ru = language === "ru";
-  const { user } = useAuthStore();
+
+  const tgUser = getTelegramUser();
+  const uid = tgUser?.id || "";
+  const userName =
+    tgUser?.first_name || tgUser?.username || (uid ? uid.slice(0, 6) : "User");
 
   const {
     workspaces,
@@ -93,7 +94,6 @@ export default function TeamPage() {
   } = useTeamStore();
 
   const [view, setView] = useState<View>("list");
-  const [userName, setUserName] = useState("");
   const [error, setError] = useState("");
   const [copiedKind, setCopiedKind] = useState<"code" | "link" | null>(null);
 
@@ -105,44 +105,22 @@ export default function TeamPage() {
   const [taskAssignee, setTaskAssignee] = useState("");
   const [taskPriority, setTaskPriority] = useState<"low" | "medium" | "high">("medium");
 
-  // Имя пользователя
   useEffect(() => {
-    if (!user?.uid) return;
-    const tgUser = getTelegramUser();
-    getDoc(doc(db, "users", user.uid)).then((snap) => {
-      if (snap.exists()) {
-        const d = snap.data();
-        setUserName(
-          d.displayName ||
-            d.name ||
-            tgUser?.first_name ||
-            tgUser?.username ||
-            user.uid.slice(0, 6)
-        );
-      } else if (tgUser) {
-        setUserName(tgUser.first_name || tgUser.username || "User");
-      } else {
-        setUserName(user.uid.slice(0, 6));
-      }
-    });
-  }, [user?.uid]);
-
-  useEffect(() => {
-    if (user?.uid) subscribeWorkspaces(user.uid);
-  }, [user?.uid]);
+    if (uid) subscribeWorkspaces(uid);
+  }, [uid]);
 
   // Авто-обработка инвайта из start_param Telegram
   useEffect(() => {
-    if (!user?.uid || !userName) return;
+    if (!uid) return;
     const param = parseStartParam();
     if (param?.type === "join") {
       setJoinCode(param.code);
       setView("join");
     }
-  }, [user?.uid, userName]);
+  }, [uid]);
 
   const currentWs = workspaces.find((w) => w.id === currentWsId);
-  const myMember = members.find((m) => m.uid === user?.uid);
+  const myMember = members.find((m) => m.uid === uid);
   const myRole: Role = myMember?.role || "member";
   const canManage = myRole === "owner" || myRole === "admin";
   const isOwner = myRole === "owner";
@@ -150,10 +128,10 @@ export default function TeamPage() {
   // ─── Действия ───
 
   const handleCreate = async () => {
-    if (!newName.trim() || !user?.uid) return;
+    if (!newName.trim() || !uid) return;
     setError("");
     try {
-      const wsId = await createWorkspace(newName, newDesc, user.uid, userName);
+      const wsId = await createWorkspace(newName, newDesc, uid, userName);
       setNewName("");
       setNewDesc("");
       selectWorkspace(wsId);
@@ -166,13 +144,12 @@ export default function TeamPage() {
   };
 
   const handleJoin = async () => {
-    if (!joinCode.trim() || !user?.uid) return;
+    if (!joinCode.trim() || !uid) return;
     setError("");
     try {
-      const tgUser = getTelegramUser();
       const wsId = await joinByCode(
         joinCode,
-        user.uid,
+        uid,
         userName,
         tgUser?.username
       );
@@ -191,12 +168,12 @@ export default function TeamPage() {
   };
 
   const handleLeave = async () => {
-    if (!currentWs || !user?.uid) return;
+    if (!currentWs || !uid) return;
     const ok = await tgConfirm(
       ru ? `Покинуть «${currentWs.name}»?` : `Leave "${currentWs.name}"?`
     );
     if (!ok) return;
-    await leaveWorkspace(currentWs.id, user.uid);
+    await leaveWorkspace(currentWs.id, uid);
     selectWorkspace(null);
     setView("list");
     triggerHaptic("success");
@@ -237,13 +214,13 @@ export default function TeamPage() {
   };
 
   const handleCreateTask = async () => {
-    if (!taskTitle.trim() || !currentWs || !user?.uid) return;
+    if (!taskTitle.trim() || !currentWs || !uid) return;
     const assignee = members.find((m) => m.uid === taskAssignee);
     await createTask(currentWs.id, {
       title: taskTitle.trim(),
       assigneeId: taskAssignee || null,
       assigneeName: assignee?.displayName || null,
-      createdBy: user.uid,
+      createdBy: uid,
       createdByName: userName,
       priority: taskPriority,
     });
@@ -252,6 +229,20 @@ export default function TeamPage() {
     setTaskPriority("medium");
     triggerHaptic("success");
   };
+
+  // ─── Если нет user (открыто не из Telegram) ───
+  if (!uid) {
+    return (
+      <div style={{ paddingTop: "40px", textAlign: "center" }}>
+        <AlertCircle size={40} color="rgba(255,255,255,0.3)" />
+        <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "14px", marginTop: "12px" }}>
+          {ru
+            ? "Открой приложение через Telegram"
+            : "Open the app via Telegram"}
+        </p>
+      </div>
+    );
+  }
 
   // ─── Рендер ───
 
@@ -304,7 +295,7 @@ export default function TeamPage() {
                     {ws.description ? ` · ${ws.description}` : ""}
                   </p>
                 </div>
-                {ws.ownerId === user?.uid && <Crown size={13} color="#f59e0b" />}
+                {ws.ownerId === uid && <Crown size={13} color="#f59e0b" />}
                 <ChevronRight size={15} color="rgba(255,255,255,0.3)" />
               </button>
             ))}
@@ -423,7 +414,7 @@ export default function TeamPage() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ fontSize: "14px", fontWeight: 600, color: "white", margin: 0 }}>
                     {m.displayName}
-                    {m.uid === user?.uid && (
+                    {m.uid === uid && (
                       <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "11px", marginLeft: "6px" }}>
                         ({ru ? "ты" : "you"})
                       </span>
@@ -435,7 +426,7 @@ export default function TeamPage() {
                     </p>
                   )}
                 </div>
-                {canManage && m.uid !== user?.uid && m.role !== "owner" ? (
+                {canManage && m.uid !== uid && m.role !== "owner" ? (
                   <select
                     value={m.role}
                     onChange={(e) => changeRole(currentWs.id, m.uid, e.target.value as Role)}
@@ -447,7 +438,7 @@ export default function TeamPage() {
                 ) : (
                   <RoleBadge role={m.role} ru={ru} />
                 )}
-                {isOwner && m.uid !== user?.uid && (
+                {isOwner && m.uid !== uid && (
                   <button
                     onClick={async () => {
                       const ok = await tgConfirm(
@@ -590,7 +581,7 @@ export default function TeamPage() {
                     flexShrink: 0,
                   }}
                 />
-                {(canManage || task.createdBy === user?.uid) && (
+                {(canManage || task.createdBy === uid) && (
                   <button onClick={() => deleteTask(currentWs.id, task.id)} style={iconBtn}>
                     <Trash2 size={12} color="rgba(239,100,100,0.6)" />
                   </button>
