@@ -102,7 +102,9 @@ type TaskStore = {
   activeWorkspaceId: string;
 
   setActiveWorkspaceId: (id: string) => void;
-  addTask: (task: Omit<Task, "id" | "createdAt" | "notified">) => Promise<Task>;
+  addTask: (
+    task: Omit<Task, "id" | "createdAt" | "notified">
+  ) => Promise<Task>;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
   toggleTaskStatus: (taskId: string) => void;
@@ -140,9 +142,8 @@ export function saveChatHistory(messages: ChatMessage[]) {
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
   } catch {}
   const userId = getTelegramUserId();
-  if (userId !== "unknown") {
+  if (userId !== "unknown")
     saveChatToFirebase(userId, "ai-assistant", messages).catch(() => {});
-  }
 }
 
 export function loadChatHistory(): ChatMessage[] {
@@ -158,9 +159,8 @@ export function saveCoachChatHistory(messages: ChatMessage[]) {
     localStorage.setItem(COACH_CHAT_STORAGE_KEY, JSON.stringify(messages));
   } catch {}
   const userId = getTelegramUserId();
-  if (userId !== "unknown") {
+  if (userId !== "unknown")
     saveChatToFirebase(userId, "ai-coach", messages).catch(() => {});
-  }
 }
 
 export function loadCoachChatHistory(): ChatMessage[] {
@@ -195,7 +195,8 @@ export async function loadChatFromFirebase(
   if (userId === "unknown") return [];
   try {
     const snap = await getDoc(doc(db, paths.chat(userId, chatId)));
-    if (snap.exists()) return (snap.data().messages || []) as ChatMessage[];
+    if (snap.exists())
+      return (snap.data().messages || []) as ChatMessage[];
   } catch {}
   return [];
 }
@@ -287,16 +288,20 @@ function normalizeTask(task: any): Task {
   };
 }
 
+function isRepeatLike(repeat: string): boolean {
+  return (
+    repeat === "daily" ||
+    repeat === "weekdays" ||
+    repeat === "weekends" ||
+    repeat.startsWith("custom:")
+  );
+}
+
 function resetDailyLike(tasks: Task[]): Task[] {
   const todayStr = new Date().toISOString().split("T")[0];
   return tasks.map((task) => {
     if (task.status !== "done") return task;
-    const isDailyLike =
-      task.repeat === "daily" ||
-      task.repeat === "weekdays" ||
-      task.repeat === "weekends" ||
-      (typeof task.repeat === "string" && task.repeat.startsWith("custom:"));
-    if (!isDailyLike) return task;
+    if (!isRepeatLike(task.repeat)) return task;
     const completedDay = task.completedAt?.split("T")[0];
     if (completedDay && completedDay < todayStr) {
       return {
@@ -334,7 +339,7 @@ function loadCategories(): CustomCategory[] {
   } catch {}
   return [
     { id: "birthdays", name: "Дни рождения", color: "#3b82f6", icon: "🎂" },
-    { id: "vacations",  name: "Отпуска",      color: "#22c55e", icon: "🌴" },
+    { id: "vacations", name: "Отпуска", color: "#22c55e", icon: "🌴" },
   ];
 }
 
@@ -360,8 +365,13 @@ function saveCategoryEventsLocal(events: CategoryEvent[]) {
 
 // ============ FIREBASE TASK OPS ============
 
-function computeReminderAt(dueDate: string, offsetMinutes: number): Date {
-  return new Date(new Date(dueDate).getTime() - offsetMinutes * 60 * 1000);
+function computeReminderAt(
+  dueDate: string,
+  offsetMinutes: number
+): Date {
+  return new Date(
+    new Date(dueDate).getTime() - offsetMinutes * 60 * 1000
+  );
 }
 
 async function saveTaskToFirebase(
@@ -377,14 +387,17 @@ async function saveTaskToFirebase(
       const d = computeReminderAt(task.dueDate, offset);
       if (!isNaN(d.getTime())) reminderAt = Timestamp.fromDate(d);
     }
-    await setDoc(doc(db, paths.task(userId, workspaceId, task.id)), {
-      ...task,
-      userId,
-      workspaceId,
-      isSent: false,
-      reminderAt,
-      updatedAt: new Date().toISOString(),
-    });
+    await setDoc(
+      doc(db, paths.task(userId, workspaceId, task.id)),
+      {
+        ...task,
+        userId,
+        workspaceId,
+        isSent: false,
+        reminderAt,
+        updatedAt: new Date().toISOString(),
+      }
+    );
   } catch (e: any) {
     console.error("saveTaskToFirebase:", e.message);
   }
@@ -430,9 +443,13 @@ async function upsertBotTask(
     };
 
     if (!existing.empty) {
-      await setDoc(doc(db, paths.botTasks(), existing.docs[0].id), data);
+      await setDoc(
+        doc(db, paths.botTasks(), existing.docs[0].id),
+        data
+      );
     } else {
-      await setDoc(doc(collection(db, paths.botTasks())), data);
+      const newRef = doc(collection(db, paths.botTasks()));
+      await setDoc(newRef, data);
     }
   } catch (e: any) {
     console.error("upsertBotTask:", e.message);
@@ -464,7 +481,9 @@ async function deleteTaskFromFirebase(
 ) {
   if (userId === "unknown") return;
   try {
-    await deleteDoc(doc(db, paths.task(userId, workspaceId, taskId)));
+    await deleteDoc(
+      doc(db, paths.task(userId, workspaceId, taskId))
+    );
   } catch {}
 }
 
@@ -486,13 +505,14 @@ async function syncAllTasksForBot(
 
 // ============ MIGRATION ============
 
-export async function migrateTasksIfNeeded(userId: string) {
+export async function migrateTasksIfNeeded(
+  userId: string
+): Promise<void> {
   if (userId === "unknown") return;
-  const MIGRATION_KEY = "cortex-migration-v2-done";
+  const MIGRATION_KEY = "cortex-migration-workspace-v1";
   if (localStorage.getItem(MIGRATION_KEY)) return;
 
   try {
-    // Проверяем есть ли старые задачи
     const legacySnap = await getDocs(
       collection(db, paths.legacyTasks(userId))
     );
@@ -505,25 +525,25 @@ export async function migrateTasksIfNeeded(userId: string) {
       `[Migration] Migrating ${legacySnap.size} tasks to workspace...`
     );
 
-    const batch = writeBatch(db);
+    const b = writeBatch(db);
     legacySnap.forEach((d) => {
       const data = d.data();
       const newRef = doc(
         db,
         paths.task(userId, PERSONAL_WORKSPACE_ID, d.id)
       );
-      batch.set(newRef, {
+      b.set(newRef, {
         ...data,
         workspaceId: PERSONAL_WORKSPACE_ID,
         updatedAt: new Date().toISOString(),
       });
     });
-    await batch.commit();
+    await b.commit();
 
     localStorage.setItem(MIGRATION_KEY, "1");
     console.log("[Migration] Done ✅");
   } catch (e: any) {
-    console.error("[Migration] Error:", e.message);
+    console.error("[Migration]:", e.message);
   }
 }
 
@@ -570,8 +590,12 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       return { tasks: updated };
     });
 
-    await saveTaskToFirebase(newTask, userId, workspaceId).catch(console.error);
-    await upsertBotTask(newTask, userId, workspaceId).catch(console.error);
+    await saveTaskToFirebase(newTask, userId, workspaceId).catch(
+      console.error
+    );
+    await upsertBotTask(newTask, userId, workspaceId).catch(
+      console.error
+    );
     return newTask;
   },
 
@@ -582,18 +606,30 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set((state) => {
       const updated = state.tasks.map((t) =>
         t.id === taskId
-          ? normalizeTask({ ...t, ...updates, updatedAt: new Date().toISOString() })
+          ? normalizeTask({
+              ...t,
+              ...updates,
+              updatedAt: new Date().toISOString(),
+            })
           : t
       );
       saveTasks(updated);
       const updatedTask = updated.find((t) => t.id === taskId);
       if (updatedTask) {
-        saveTaskToFirebase(updatedTask, userId, workspaceId).catch(console.error);
+        saveTaskToFirebase(
+          updatedTask,
+          userId,
+          workspaceId
+        ).catch(console.error);
         if (
           updates.dueDate !== undefined ||
           updates.reminderOffsetMinutes !== undefined
         ) {
-          upsertBotTask(updatedTask, userId, workspaceId).catch(console.error);
+          upsertBotTask(
+            updatedTask,
+            userId,
+            workspaceId
+          ).catch(console.error);
         }
       }
       return { tasks: updated };
@@ -607,7 +643,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set((state) => {
       const updated = state.tasks.filter((t) => t.id !== taskId);
       saveTasks(updated);
-      deleteTaskFromFirebase(taskId, userId, workspaceId).catch(console.error);
+      deleteTaskFromFirebase(taskId, userId, workspaceId).catch(
+        console.error
+      );
       deleteBotTask(taskId, userId).catch(console.error);
       return { tasks: updated };
     });
@@ -632,7 +670,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       saveTasks(updated);
       const updatedTask = updated.find((t) => t.id === taskId);
       if (updatedTask)
-        saveTaskToFirebase(updatedTask, userId, workspaceId).catch(console.error);
+        saveTaskToFirebase(
+          updatedTask,
+          userId,
+          workspaceId
+        ).catch(console.error);
       return { tasks: updated };
     });
   },
@@ -645,14 +687,20 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set((s) => ({ birthdays: [...s.birthdays, nb] }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      setDoc(doc(db, paths.birthday(userId, id)), nb).catch(console.error);
+      setDoc(doc(db, paths.birthday(userId, id)), nb).catch(
+        console.error
+      );
   },
 
   deleteBirthday: async (id) => {
-    set((s) => ({ birthdays: s.birthdays.filter((b) => b.id !== id) }));
+    set((s) => ({
+      birthdays: s.birthdays.filter((b) => b.id !== id),
+    }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(doc(db, paths.birthday(userId, id))).catch(console.error);
+      deleteDoc(doc(db, paths.birthday(userId, id))).catch(
+        console.error
+      );
   },
 
   addVacation: async (vacation) => {
@@ -661,14 +709,20 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set((s) => ({ vacations: [...s.vacations, nv] }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      setDoc(doc(db, paths.vacation(userId, id)), nv).catch(console.error);
+      setDoc(doc(db, paths.vacation(userId, id)), nv).catch(
+        console.error
+      );
   },
 
   deleteVacation: async (id) => {
-    set((s) => ({ vacations: s.vacations.filter((v) => v.id !== id) }));
+    set((s) => ({
+      vacations: s.vacations.filter((v) => v.id !== id),
+    }));
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(doc(db, paths.vacation(userId, id))).catch(console.error);
+      deleteDoc(doc(db, paths.vacation(userId, id))).catch(
+        console.error
+      );
   },
 
   addCategory: (category) => {
@@ -692,7 +746,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   deleteCategory: (id) =>
     set((s) => {
       const cats = s.categories.filter((c) => c.id !== id);
-      const events = s.categoryEvents.filter((e) => e.categoryId !== id);
+      const events = s.categoryEvents.filter(
+        (e) => e.categoryId !== id
+      );
       saveCategories(cats);
       saveCategoryEventsLocal(events);
       return { categories: cats, categoryEvents: events };
@@ -708,7 +764,10 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     });
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      setDoc(doc(db, paths.categoryEvent(userId, id)), ne).catch(console.error);
+      setDoc(
+        doc(db, paths.categoryEvent(userId, id)),
+        ne
+      ).catch(console.error);
   },
 
   deleteCategoryEvent: async (id) => {
@@ -719,7 +778,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     });
     const userId = getTelegramUserId();
     if (userId !== "unknown")
-      deleteDoc(doc(db, paths.categoryEvent(userId, id))).catch(console.error);
+      deleteDoc(
+        doc(db, paths.categoryEvent(userId, id))
+      ).catch(console.error);
   },
 
   loadUserData: async (userId, workspaceId) => {
@@ -727,7 +788,6 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       set({ isDataLoaded: true });
       return;
     }
-
     try {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
@@ -737,7 +797,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         getDocs(collection(db, paths.birthdays(userId))),
         getDocs(collection(db, paths.vacations(userId))),
         getDocs(collection(db, paths.categoryEvents(userId))),
-        getDocs(collection(db, paths.tasks(userId, workspaceId))),
+        getDocs(
+          collection(db, paths.tasks(userId, workspaceId))
+        ),
       ]);
 
       const birthdays: Birthday[] = [];
@@ -747,7 +809,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       vSnap.forEach((d) => vacations.push(d.data() as Vacation));
 
       const categoryEvents: CategoryEvent[] = [];
-      ceSnap.forEach((d) => categoryEvents.push(d.data() as CategoryEvent));
+      ceSnap.forEach((d) =>
+        categoryEvents.push(d.data() as CategoryEvent)
+      );
 
       const cloudMap = new Map<string, Task>();
       const batch = writeBatch(db);
@@ -755,11 +819,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
       tSnap.forEach((d) => {
         const data = d.data();
-        const isDailyLike =
-          data.repeat === "daily" ||
-          data.repeat === "weekdays" ||
-          data.repeat === "weekends" ||
-          (typeof data.repeat === "string" && data.repeat.startsWith("custom:"));
+        const isDailyLike = isRepeatLike(data.repeat || "");
 
         if (
           data.status === "done" &&
@@ -773,7 +833,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           }
         }
 
-        if (isDailyLike && data.status === "done" && data.completedAt) {
+        if (
+          isDailyLike &&
+          data.status === "done" &&
+          data.completedAt
+        ) {
           if (data.completedAt.split("T")[0] < todayStr) {
             const reset = normalizeTask({
               ...data,
@@ -799,7 +863,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       if (hasChanges) await batch.commit();
 
       const localTasks = loadTasks().filter(
-        (t) => (t.workspaceId || PERSONAL_WORKSPACE_ID) === workspaceId
+        (t) =>
+          (t.workspaceId || PERSONAL_WORKSPACE_ID) === workspaceId
       );
       const localMap = new Map(localTasks.map((t) => [t.id, t]));
       const merged: Task[] = [];
@@ -825,22 +890,27 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
             if (new Date(local.completedAt) < yesterday) return;
           }
           merged.push(local);
-          saveTaskToFirebase(local, userId, workspaceId).catch(console.error);
-          upsertBotTask(local, userId, workspaceId).catch(console.error);
+          saveTaskToFirebase(local, userId, workspaceId).catch(
+            console.error
+          );
+          upsertBotTask(local, userId, workspaceId).catch(
+            console.error
+          );
         }
       });
 
-      // Объединяем с задачами других workspace из localStorage
+      // Сохраняем задачи других workspace из localStorage
       const otherTasks = loadTasks().filter(
-        (t) => (t.workspaceId || PERSONAL_WORKSPACE_ID) !== workspaceId
+        (t) =>
+          (t.workspaceId || PERSONAL_WORKSPACE_ID) !== workspaceId
       );
-      const allTasks = [...otherTasks, ...merged];
-      saveTasks(allTasks);
+      saveTasks([...otherTasks, ...merged]);
 
       const localEvents = loadCategoryEvents();
       const mergedEvents = [...categoryEvents];
       localEvents.forEach((le) => {
-        if (!mergedEvents.find((e) => e.id === le.id)) mergedEvents.push(le);
+        if (!mergedEvents.find((e) => e.id === le.id))
+          mergedEvents.push(le);
       });
       saveCategoryEventsLocal(mergedEvents);
 
@@ -853,7 +923,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       });
 
       setTimeout(() => {
-        syncAllTasksForBot(merged, userId, workspaceId).catch(console.error);
+        syncAllTasksForBot(merged, userId, workspaceId).catch(
+          console.error
+        );
       }, 2000);
     } catch (e) {
       console.error("loadUserData:", e);
@@ -877,12 +949,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
         snapshot.forEach((d) => {
           const data = d.data();
-          const isDailyLike =
-            data.repeat === "daily" ||
-            data.repeat === "weekdays" ||
-            data.repeat === "weekends" ||
-            (typeof data.repeat === "string" &&
-              data.repeat.startsWith("custom:"));
+          const isDailyLike = isRepeatLike(data.repeat || "");
 
           if (
             data.status === "done" &&
@@ -892,34 +959,53 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           )
             return;
 
-          if (isDailyLike && data.status === "done" && data.completedAt) {
-            if (data.completedAt.split("T")[0] < todayStr) {
-              cloudMap.set(
-                d.id,
-                normalizeTask({ ...data, id: d.id, status: "todo", completedAt: undefined })
-              );
-              return;
-            }
+          if (
+            isDailyLike &&
+            data.status === "done" &&
+            data.completedAt &&
+            data.completedAt.split("T")[0] < todayStr
+          ) {
+            cloudMap.set(
+              d.id,
+              normalizeTask({
+                ...data,
+                id: d.id,
+                status: "todo",
+                completedAt: undefined,
+              })
+            );
+            return;
           }
 
-          cloudMap.set(d.id, normalizeTask({ ...data, id: d.id }));
+          cloudMap.set(
+            d.id,
+            normalizeTask({ ...data, id: d.id })
+          );
         });
 
         set((state) => {
           const otherTasks = state.tasks.filter(
-            (t) => (t.workspaceId || PERSONAL_WORKSPACE_ID) !== workspaceId
+            (t) =>
+              (t.workspaceId || PERSONAL_WORKSPACE_ID) !==
+              workspaceId
           );
           const currentTasks = state.tasks.filter(
-            (t) => (t.workspaceId || PERSONAL_WORKSPACE_ID) === workspaceId
+            (t) =>
+              (t.workspaceId || PERSONAL_WORKSPACE_ID) ===
+              workspaceId
           );
-          const localMap = new Map(currentTasks.map((t) => [t.id, t]));
+          const localMap = new Map(
+            currentTasks.map((t) => [t.id, t])
+          );
           const merged: Task[] = [];
 
           cloudMap.forEach((cloud) => {
             const local = localMap.get(cloud.id);
             if (local) {
-              const ct = cloud.updatedAt || cloud.createdAt || "";
-              const lt = local.updatedAt || local.createdAt || "";
+              const ct =
+                cloud.updatedAt || cloud.createdAt || "";
+              const lt =
+                local.updatedAt || local.createdAt || "";
               merged.push(ct >= lt ? cloud : local);
             } else {
               merged.push(cloud);
@@ -929,12 +1015,15 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
           localMap.forEach((local) => {
             if (!cloudMap.has(local.id)) {
               merged.push(local);
-              saveTaskToFirebase(local, userId, workspaceId).catch(console.error);
+              saveTaskToFirebase(
+                local,
+                userId,
+                workspaceId
+              ).catch(console.error);
             }
           });
 
-          const all = [...otherTasks, ...merged];
-          saveTasks(all);
+          saveTasks([...otherTasks, ...merged]);
           return { tasks: merged, isSynced: true };
         });
       },
@@ -956,11 +1045,14 @@ export function usePersistTasks() {
 
     const userId = getTelegramUserId();
     const workspaceId =
-      localStorage.getItem("cortex-active-workspace") || PERSONAL_WORKSPACE_ID;
+      localStorage.getItem("cortex-active-workspace") ||
+      PERSONAL_WORKSPACE_ID;
 
-    migrateTasksIfNeeded(userId);
+    migrateTasksIfNeeded(userId).catch(console.error);
     useTaskStore.getState().loadUserData(userId, workspaceId);
-    const unsub = useTaskStore.getState().startSync(userId, workspaceId);
+    const unsub = useTaskStore
+      .getState()
+      .startSync(userId, workspaceId);
 
     return () => unsub();
   }, []);
