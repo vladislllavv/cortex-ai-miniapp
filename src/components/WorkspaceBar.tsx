@@ -3,21 +3,21 @@ import { ChevronDown, Check } from "lucide-react";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useTeamStore } from "@/lib/teamStore";
-import { triggerHaptic, getTelegramUser } from "@/lib/telegram";
+import { getTelegramUserId } from "@/lib/store";
+import { triggerHaptic } from "@/lib/telegram";
 
 export default function WorkspaceBar() {
   const language = useI18nStore((s) => s.language);
   const { theme } = useTheme();
   const ru = language === "ru";
-  const tgUser = getTelegramUser();
-  const uid = tgUser?.id || null;
+  const uid = getTelegramUserId();
 
   const { workspaces, currentWsId, selectWorkspace, subscribeWorkspaces } =
     useTeamStore();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (uid) subscribeWorkspaces(uid);
+    if (uid && uid !== "unknown") subscribeWorkspaces(uid);
   }, [uid]);
 
   const current = workspaces.find((w) => w.id === currentWsId);
