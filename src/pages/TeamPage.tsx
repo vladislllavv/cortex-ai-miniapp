@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useTeamStore, Role } from "@/lib/teamStore";
+import { getTelegramUserId } from "@/lib/store";
 import {
   copyInviteCode,
   copyInviteLink,
@@ -69,10 +70,10 @@ export default function TeamPage() {
   const { theme } = useTheme();
   const ru = language === "ru";
 
+  const uid = getTelegramUserId();
   const tgUser = getTelegramUser();
-  const uid = tgUser?.id || "";
   const userName =
-    tgUser?.first_name || tgUser?.username || (uid ? uid.slice(0, 6) : "User");
+    tgUser?.first_name || tgUser?.username || (uid !== "unknown" ? uid.slice(0, 6) : "User");
 
   const {
     workspaces,
@@ -106,12 +107,12 @@ export default function TeamPage() {
   const [taskPriority, setTaskPriority] = useState<"low" | "medium" | "high">("medium");
 
   useEffect(() => {
-    if (uid) subscribeWorkspaces(uid);
+    if (uid && uid !== "unknown") subscribeWorkspaces(uid);
   }, [uid]);
 
   // Авто-обработка инвайта из start_param Telegram
   useEffect(() => {
-    if (!uid) return;
+    if (!uid || uid === "unknown") return;
     const param = parseStartParam();
     if (param?.type === "join") {
       setJoinCode(param.code);
@@ -128,7 +129,7 @@ export default function TeamPage() {
   // ─── Действия ───
 
   const handleCreate = async () => {
-    if (!newName.trim() || !uid) return;
+    if (!newName.trim() || !uid || uid === "unknown") return;
     setError("");
     try {
       const wsId = await createWorkspace(newName, newDesc, uid, userName);
@@ -144,7 +145,7 @@ export default function TeamPage() {
   };
 
   const handleJoin = async () => {
-    if (!joinCode.trim() || !uid) return;
+    if (!joinCode.trim() || !uid || uid === "unknown") return;
     setError("");
     try {
       const wsId = await joinByCode(
@@ -168,7 +169,7 @@ export default function TeamPage() {
   };
 
   const handleLeave = async () => {
-    if (!currentWs || !uid) return;
+    if (!currentWs || !uid || uid === "unknown") return;
     const ok = await tgConfirm(
       ru ? `Покинуть «${currentWs.name}»?` : `Leave "${currentWs.name}"?`
     );
@@ -214,7 +215,7 @@ export default function TeamPage() {
   };
 
   const handleCreateTask = async () => {
-    if (!taskTitle.trim() || !currentWs || !uid) return;
+    if (!taskTitle.trim() || !currentWs || !uid || uid === "unknown") return;
     const assignee = members.find((m) => m.uid === taskAssignee);
     await createTask(currentWs.id, {
       title: taskTitle.trim(),
@@ -230,8 +231,8 @@ export default function TeamPage() {
     triggerHaptic("success");
   };
 
-  // ─── Если нет user (открыто не из Telegram) ───
-  if (!uid) {
+  // ─── Если нет user ───
+  if (!uid || uid === "unknown") {
     return (
       <div style={{ paddingTop: "40px", textAlign: "center" }}>
         <AlertCircle size={40} color="rgba(255,255,255,0.3)" />
