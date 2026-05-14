@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, ArrowLeft } from "lucide-react";
 import SettingsPage from "./SettingsPage";
 import WeeklyGoalsPage from "./WeeklyGoalsPage";
+import TeamPage from "./TeamPage";
 
-type SubView = null | "settings" | "goals";
+type SubView = null | "settings" | "goals" | "team";
 
 export default function MorePage() {
   const language = useI18nStore((s) => s.language);
@@ -13,25 +14,30 @@ export default function MorePage() {
   const ru = language === "ru";
   const [subView, setSubView] = useState<SubView>(null);
 
+  const BackBtn = ({ label }: { label: string }) => (
+    <button
+      onClick={() => setSubView(null)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        color: "rgba(255,255,255,0.5)",
+        fontSize: "13px",
+        padding: "0 0 14px 0",
+      }}
+    >
+      <ArrowLeft size={14} />
+      {label}
+    </button>
+  );
+
   if (subView === "settings") {
     return (
       <div>
-        <button
-          onClick={() => setSubView(null)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "rgba(255,255,255,0.5)",
-            fontSize: "13px",
-            padding: "0 0 14px 0",
-          }}
-        >
-          ← {ru ? "Назад" : "Back"}
-        </button>
+        <BackBtn label={ru ? "Назад" : "Back"} />
         <SettingsPage />
       </div>
     );
@@ -40,28 +46,31 @@ export default function MorePage() {
   if (subView === "goals") {
     return (
       <div>
-        <button
-          onClick={() => setSubView(null)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "rgba(255,255,255,0.5)",
-            fontSize: "13px",
-            padding: "0 0 14px 0",
-          }}
-        >
-          ← {ru ? "Назад" : "Back"}
-        </button>
+        <BackBtn label={ru ? "Назад" : "Back"} />
         <WeeklyGoalsPage />
       </div>
     );
   }
 
+  if (subView === "team") {
+    return (
+      <div>
+        <BackBtn label={ru ? "Назад" : "Back"} />
+        <TeamPage />
+      </div>
+    );
+  }
+
   const menuItems = [
+    {
+      id: "team",
+      emoji: "👥",
+      label: ru ? "Команда" : "Team",
+      desc: ru
+        ? "Пространства, участники, задачи"
+        : "Workspaces, members, tasks",
+      color: "#f59e0b",
+    },
     {
       id: "goals",
       emoji: "🎯",
@@ -73,7 +82,9 @@ export default function MorePage() {
       id: "settings",
       emoji: "⚙️",
       label: ru ? "Настройки" : "Settings",
-      desc: ru ? "Тема, язык, мотивация, аккаунт" : "Theme, language, motivation",
+      desc: ru
+        ? "Тема, язык, мотивация, аккаунт"
+        : "Theme, language, motivation, account",
       color: "#6366f1",
     },
   ];
@@ -150,7 +161,6 @@ export default function MorePage() {
         ))}
       </div>
 
-      {/* Версия */}
       <p
         style={{
           fontSize: "11px",
