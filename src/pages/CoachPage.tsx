@@ -1,774 +1,382 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useI18nStore } from "@/lib/i18n";
-import {
-  useTaskStore,
-  getTelegramUserId,
-  checkSubscription,
-  saveCoachChatHistory,
-  loadCoachChatHistory,
-  loadChatFromFirebase,
-  ChatMessage,
-} from "@/lib/store";
-import { db } from "@/lib/firebase";
-import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
-import { Send, Mic, MicOff, VolumeX, Copy, Check } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
-import CoachAvatar, { CoachState } from "@/components/CoachAvatar";
+import { User, Send, Trash2, ChevronDown } from "lucide-react";
+import { useAuthStore } from "@/lib/authStore";
+import { db } from "@/lib/firebase";
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  serverTimestamp,
+  deleteDoc,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+import { callGemini } from "@/lib/gemini";
 
-const AI_WORKER_URL = "https://ancient-river-8a20.bubo-buboff.workers.dev";
-const COACH_FREE_LIMIT = 2;
-const COACH_USAGE_KEY = "cortex-coach-usage";
-
-function getCoachUsage(): number {
-  try {
-    const stored = localStorage.getItem(COACH_USAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      const today = new Date().toISOString().split("T")[0];
-      if (parsed.date === today) return parsed.count;
-    }
-  } catch {}
-  return 0;
-}
-
-function setCoachUsageStorage(count: number) {
-  const today = new Date().toISOString().split("T")[0];
-  localStorage.setItem(COACH_USAGE_KEY, JSON.stringify({ date: today, count }));
-}
-
-interface UserProfile {
-  weight?: string;
-  height?: string;
-  age?: string;
-  fitnessLevel?: string;
-  goals?: string;
-}
-
-interface WeeklyGoal {
+interface Message {
   id: string;
+  role: "user" | "assistant";
   text: string;
-  completed: boolean;
-  weekStart: string;
+  ts: number;
 }
 
-function getWeekStart(): string {
-  const now = new Date();
-  const day = now.getDay();
-  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(now);
-  monday.setDate(diff);
-  return monday.toISOString().split("T")[0];
+interface CoachPageProps {
+  embedded?: boolean;
+  onOpenProfile?: () => void;
 }
 
-function speakText(
-  text: string,
-  lang: string,
-  onStart: () => void,
-  onEnd: () => void
-) {
-  if (!("speechSynthesis" in window)) {
-    onEnd();
-    return;
-  }
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = lang === "ru" ? "ru-RU" : "en-US";
-  utterance.rate = 0.95;
-  utterance.pitch = 1.05;
-  utterance.onstart = onStart;
-  utterance.onend = onEnd;
-  utterance.onerror = onEnd;
-  window.speechSynthesis.speak(utterance);
+// ─── Анимированный аватар-привидение ───────────────────────────────────────
+function CoachAvatar({ size = 90 }: { size?: number }) {
+  const { theme } = useTheme();
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: size,
+        height: size,
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {/* Glow */}
+      <div
+        style={{
+          position: "absolute",
+          inset: -4,
+          borderRadius: "50%",
+          background: `radial-gradient(circle, ${theme.primary}40 0%, transparent 70%)`,
+          animation: "ghost-glow 3s ease-in-out infinite",
+          pointerEvents: "none",
+        }}
+      />
+      {/* Ghost emoji */}
+      <div
+        style={{
+          fontSize: size * 0.72,
+          lineHeight: 1,
+          animation: "ghost-float 4s ease-in-out infinite",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          userSelect: "none",
+        }}
+      >
+        👻
+      </div>
+    </div>
+  );
 }
 
-function stopSpeaking() {
-  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-}
-
-function isTTSAvailable(): boolean {
-  return "speechSynthesis" in window;
-}
-
-export default function CoachPage() {
-  const language = useI18nStore((state) => state.language);
-  const tasks = useTaskStore((state) => state.tasks);
-  const addTask = useTaskStore((state) => state.addTask);
+export default function CoachPage({ embedded, onOpenProfile }: CoachPageProps) {
+  const language = useI18nStore((s) => s.language);
   const { theme } = useTheme();
   const ru = language === "ru";
-  const userId = getTelegramUserId();
+  const { user } = useAuthStore();
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [hasSubscription, setHasSubscription] = useState<boolean | null>(null);
-  const [coachUsage, setCoachUsageState] = useState(() => getCoachUsage());
-  const [chatLoaded, setChatLoaded] = useState(false);
-
-  const [coachState, setCoachState] = useState<CoachState>("idle");
-  const [ttsEnabled, setTtsEnabled] = useState(true);
-  const [isListening, setIsListening] = useState(false);
-  const [copiedId, setCopiedId] = useState<number | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const [userName, setUserName] = useState("");
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const sendingRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const [profile, setProfile] = useState<UserProfile>({});
-  const [weeklyGoals, setWeeklyGoals] = useState<WeeklyGoal[]>([]);
-
-  const isLimited = hasSubscription === false && coachUsage >= COACH_FREE_LIMIT;
-
+  // Загрузка имени пользователя
   useEffect(() => {
-    checkSubscription(userId).then(setHasSubscription);
+    if (!user?.uid) return;
+    getDoc(doc(db, "users", user.uid)).then((snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setUserName(d.displayName || d.name || "");
+      }
+    });
+  }, [user?.uid]);
 
-    if (userId !== "unknown") {
-      // Загрузка профиля и целей
-      getDoc(doc(db, "users", userId, "settings", "profile"))
-        .then((snap) => {
-          if (snap.exists()) setProfile(snap.data() as UserProfile);
-        })
-        .catch(() => {});
+  // Подписка на сообщения
+  useEffect(() => {
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, "users", user.uid, "coachMessages"),
+      orderBy("ts", "asc")
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setMessages(
+        snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<Message, "id">),
+        }))
+      );
+    });
+    return unsub;
+  }, [user?.uid]);
 
-      getDocs(collection(db, "users", userId, "weeklyGoals"))
-        .then((snap) => {
-          const goals: WeeklyGoal[] = [];
-          snap.forEach((d) => goals.push(d.data() as WeeklyGoal));
-          setWeeklyGoals(goals.filter((g) => g.weekStart === getWeekStart()));
-        })
-        .catch(() => {});
-
-      // Загрузка чата из Firebase
-      loadChatFromFirebase(userId, "ai-coach").then((firebaseMessages) => {
-        if (firebaseMessages.length > 0) {
-          setMessages(firebaseMessages as ChatMessage[]);
-        } else {
-          const local = loadCoachChatHistory();
-          if (local.length > 0) setMessages(local as ChatMessage[]);
-        }
-        setChatLoaded(true);
-      });
-    } else {
-      setChatLoaded(true);
-    }
-  }, [userId]);
-
+  // Автоскролл
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => {
-    if (chatLoaded && messages.length > 0) {
-      saveCoachChatHistory(messages);
-    }
-  }, [messages, chatLoaded]);
-
-  useEffect(() => {
-    return () => {
-      stopSpeaking();
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-        recognitionRef.current = null;
-      }
-    };
-  }, []);
-
-  // Приветствие при первом открытии
-  useEffect(() => {
-    if (chatLoaded && messages.length === 0) {
-      const welcome: ChatMessage = {
-        role: "assistant",
-        content: ru
-          ? `Привет! 👋 Я твой AI коуч.\n\n${
-              hasSubscription === false
-                ? `⚠️ Осталось ${COACH_FREE_LIMIT - coachUsage} из ${COACH_FREE_LIMIT} бесплатных запросов.\n\n`
-                : ""
-            }Задай вопрос текстом или голосом 🎤\nЯ помогу с целями, мотивацией и планированием 💪`
-          : `Hi! 👋 I'm your AI coach.\n\n${
-              hasSubscription === false
-                ? `⚠️ ${COACH_FREE_LIMIT - coachUsage} of ${COACH_FREE_LIMIT} free requests left.\n\n`
-                : ""
-            }Ask me anything via text or voice 🎤\nI'll help with goals, motivation and planning 💪`,
-        timestamp: Date.now(),
-      };
-      setMessages([welcome]);
-    }
-  }, [chatLoaded]);
-
-  const handleCoachSpeak = useCallback(
-    (text: string) => {
-      if (!ttsEnabled || !isTTSAvailable()) {
-        setCoachState("idle");
-        return;
-      }
-      const clean = text
-        .replace(/GOALS_JSON:\[[\s\S]*?\]/g, "")
-        .replace(/✅ Добавлено .+ целей.*$/m, "")
-        .replace(/✅ Added .+ goals.*$/m, "")
-        .trim();
-      if (!clean) {
-        setCoachState("idle");
-        return;
-      }
-      setCoachState("speaking");
-      speakText(
-        clean,
-        language,
-        () => setCoachState("speaking"),
-        () => setCoachState("idle")
-      );
-    },
-    [ttsEnabled, language]
-  );
-
-  const startListening = useCallback(() => {
-    const SR =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      (window as any).Telegram?.WebApp?.showAlert(
-        ru
-          ? "Голосовой ввод не поддерживается"
-          : "Voice input not supported"
-      );
-      return;
-    }
-    stopSpeaking();
-    setCoachState("listening");
-    setIsListening(true);
-
-    const r = new SR();
-    r.lang = ru ? "ru-RU" : "en-US";
-    r.continuous = false;
-    r.interimResults = false;
-    r.onresult = (e: any) => {
-      const transcript = e.results[0][0].transcript;
-      setInput(transcript);
-      setIsListening(false);
-      setCoachState("idle");
-      recognitionRef.current = null;
-      setTimeout(() => sendMessage(transcript), 100);
-    };
-    r.onerror = () => {
-      setIsListening(false);
-      setCoachState("idle");
-      recognitionRef.current = null;
-    };
-    r.onend = () => {
-      setIsListening(false);
-      setCoachState("idle");
-      recognitionRef.current = null;
-    };
-    recognitionRef.current = r;
-    r.start();
-  }, [ru]);
-
-  const stopListening = useCallback(() => {
-    if (recognitionRef.current) {
-      recognitionRef.current.abort();
-      recognitionRef.current = null;
-    }
-    setIsListening(false);
-    setCoachState("idle");
-  }, []);
-
-  const copyMessage = async (content: string, index: number) => {
-    try {
-      await navigator.clipboard.writeText(content);
-    } catch {
-      const el = document.createElement("textarea");
-      el.value = content;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
-    }
-    setCopiedId(index);
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 80);
   };
 
-  const sendMessage = async (text?: string) => {
-    if (sendingRef.current) return;
-    const messageText = (text || input).trim();
-    if (!messageText || loading) return;
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
-    if (isLimited) {
-      const tg = (window as any).Telegram?.WebApp;
-      tg?.showAlert(
-        ru
-          ? `Лимит ${COACH_FREE_LIMIT} запросов в день 🤖\n\nОформи подписку!`
-          : `Daily limit of ${COACH_FREE_LIMIT} requests 🤖\n\nGet subscription!`
-      );
-      tg?.openTelegramLink("https://t.me/aiplannerrubot?start=subscribe");
-      return;
-    }
-
-    sendingRef.current = true;
-    const userMsg: ChatMessage = {
-      role: "user",
-      content: messageText,
-      timestamp: Date.now(),
-    };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
+  const sendMessage = async () => {
+    if (!input.trim() || !user?.uid || loading) return;
+    const text = input.trim();
     setInput("");
     setLoading(true);
-    setCoachState("thinking");
 
-    if (hasSubscription === false) {
-      const nc = coachUsage + 1;
-      setCoachUsageState(nc);
-      setCoachUsageStorage(nc);
-    }
+    await addDoc(collection(db, "users", user.uid, "coachMessages"), {
+      role: "user",
+      text,
+      ts: Date.now(),
+    });
 
     try {
-      const activeTasks = tasks.filter((t) => t.status !== "done").slice(0, 5);
-      const profileStr = Object.entries(profile)
-        .filter(([, v]) => v)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join(", ");
+      const history = messages.slice(-12).map((m) => ({
+        role: m.role,
+        parts: [{ text: m.text }],
+      }));
 
-      const systemPrompt = `Ты персональный AI коуч в приложении CortexAI. Ведёшь диалог с пользователем.
+      const systemPrompt = ru
+        ? `Ты персональный AI-коуч по продуктивности и целеполаганию. Зовут пользователя: ${userName || "друг"}. Отвечай по-русски, кратко, мотивирующе, с конкретными советами. Используй эмодзи умеренно.`
+        : `You are a personal AI productivity and goal-setting coach. User's name: ${userName || "friend"}. Reply in English, concisely, motivationally, with specific advice. Use emojis moderately.`;
 
-Профиль: ${profileStr || "не заполнен"}
-Активные задачи: ${activeTasks.map((t) => t.title).join(", ") || "нет"}
-Цели этой недели: ${
-        weeklyGoals.length > 0
-          ? weeklyGoals
-              .map((g) => `${g.text} [${g.completed ? "✅" : "⬜"}]`)
-              .join(", ")
-          : "нет"
-      }
+      const reply = await callGemini(text, history, systemPrompt);
 
-Ты можешь задавать уточняющие вопросы. Когда готов создать цели — добавь в конец:
-GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
-
-Правила:
-- Отвечай коротко (2-3 предложения)
-- ${ru ? "Только на русском" : "Only in English"}
-- Используй эмодзи
-- Задавай 1 вопрос если нужно уточнение
-- dueDate = null если нет конкретной даты`;
-
-      const response = await fetch(AI_WORKER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: newMessages.slice(-8).map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          systemPrompt,
-        }),
+      await addDoc(collection(db, "users", user.uid, "coachMessages"), {
+        role: "assistant",
+        text: reply,
+        ts: Date.now() + 1,
       });
-
-      if (!response.ok) throw new Error(`Worker error: ${response.status}`);
-      const data = await response.json();
-      const aiResponse = data.content || "⚠️ Нет ответа";
-
-      // Парсим и создаём цели
-      const goalsMatch = aiResponse.match(/GOALS_JSON:(\[[\s\S]*?\])/);
-      let addedCount = 0;
-
-      if (goalsMatch) {
-        try {
-          const parsed = JSON.parse(goalsMatch[1]);
-          for (const g of parsed) {
-            if (g.text && g.text.trim().length > 1) {
-              const goalId = `goal_${Date.now()}_${Math.random()
-                .toString(36)
-                .substr(2, 6)}`;
-              const weekStart = getWeekStart();
-
-              // Сохраняем цель
-              if (userId !== "unknown") {
-                setDoc(
-                  doc(db, "users", userId, "weeklyGoals", goalId),
-                  {
-                    id: goalId,
-                    text: g.text.trim(),
-                    completed: false,
-                    weekStart,
-                    createdAt: new Date().toISOString(),
-                    category: "ai",
-                    dueDate: g.dueDate || null,
-                  }
-                ).catch(() => {});
-              }
-
-              // Создаём задачу через store
-              await addTask({
-                title: `🎯 ${g.text.trim()}`,
-                dueDate: g.dueDate || undefined,
-                priority: "medium",
-                status: "todo",
-                isAiCreated: true,
-                repeat: "none",
-                type: "task",
-                description: ru
-                  ? "Цель недели от AI коуча"
-                  : "Weekly goal from AI coach",
-                items: [],
-              });
-
-              addedCount++;
-            }
-          }
-        } catch (e) {
-          console.error("Goals parse error:", e);
-        }
-      }
-
-      const cleanResponse = aiResponse
-        .replace(/GOALS_JSON:\[[\s\S]*?\]/, "")
-        .trim();
-
-      const finalMsg =
-        addedCount > 0
-          ? `${cleanResponse}\n\n✅ ${
-              ru
-                ? `Добавлено ${addedCount} целей в список задач!`
-                : `Added ${addedCount} goals to your task list!`
-            }`
-          : cleanResponse;
-
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: finalMsg, timestamp: Date.now() },
-      ]);
-
-      handleCoachSpeak(finalMsg);
-    } catch (err) {
-      console.error("AI error:", err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: ru
-            ? "⚠️ Ошибка подключения. Попробуй ещё раз."
-            : "⚠️ Connection error. Try again.",
-          timestamp: Date.now(),
-        },
-      ]);
-      setCoachState("idle");
+    } catch {
+      await addDoc(collection(db, "users", user.uid, "coachMessages"), {
+        role: "assistant",
+        text: ru
+          ? "Произошла ошибка. Попробуй ещё раз."
+          : "An error occurred. Please try again.",
+        ts: Date.now() + 1,
+      });
     } finally {
       setLoading(false);
-      sendingRef.current = false;
     }
   };
 
-  const quickPrompts = ru
-    ? [
-        "Составь план на неделю",
-        "Оцени мой прогресс",
-        "Советы по продуктивности",
-        "Я в стрессе",
-      ]
-    : [
-        "Create weekly plan",
-        "Assess my progress",
-        "Productivity tips",
-        "I'm stressed",
-      ];
+  const clearHistory = async () => {
+    if (!user?.uid) return;
+    const q = query(collection(db, "users", user.uid, "coachMessages"));
+    const snap = await import("firebase/firestore").then(({ getDocs }) =>
+      getDocs(q)
+    );
+    await Promise.all(snap.docs.map((d) => deleteDoc(doc(db, "users", user.uid!, "coachMessages", d.id))));
+  };
+
+  const greeting = ru
+    ? `Привет${userName ? ", " + userName : ""}! 👋 Я твой AI-коуч. Расскажи о своих целях или задай вопрос о продуктивности.`
+    : `Hey${userName ? ", " + userName : ""}! 👋 I'm your AI coach. Tell me about your goals or ask about productivity.`;
 
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 120px)",
-        maxHeight: "calc(100vh - 120px)",
+        flex: 1,
+        minHeight: 0,
         overflow: "hidden",
+        paddingBottom: "68px",
       }}
     >
-      {/* ===== ПЕРСОНАЖ + ЗАГОЛОВОК ===== */}
+      {/* ── Шапка с аватаром + кнопка Профиль ───────────────────── */}
       <div
         style={{
           display: "flex",
-          flexDirection: "column",
           alignItems: "center",
-          paddingTop: "4px",
-          paddingBottom: "10px",
+          justifyContent: "space-between",
+          paddingTop: "8px",
+          paddingBottom: "12px",
           flexShrink: 0,
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}
       >
-        <CoachAvatar state={coachState} size={80} />
+        {/* Левая часть: аватар + заголовок */}
         <div
           style={{
-            marginTop: "6px",
             display: "flex",
             alignItems: "center",
-            gap: "8px",
+            gap: "12px",
           }}
         >
-          <p
-            style={{
-              fontSize: "14px",
-              fontWeight: 700,
-              color: "white",
-              margin: 0,
-            }}
-          >
-            AI {ru ? "Коуч" : "Coach"}
-          </p>
-          <span
-            style={{
-              fontSize: "10px",
-              backgroundColor: `${theme.primary}25`,
-              color: theme.primary,
-              padding: "1px 6px",
-              borderRadius: "8px",
-            }}
-          >
-            {coachState === "idle" && "💪"}
-            {coachState === "listening" && "🎤"}
-            {coachState === "thinking" && "🤔"}
-            {coachState === "speaking" && "🗣"}
-          </span>
-
-          {/* TTS кнопка */}
-          {isTTSAvailable() && (
-            <button
-              onClick={() => {
-                if (ttsEnabled) stopSpeaking();
-                setTtsEnabled(!ttsEnabled);
-              }}
+          {/* Аватар с отступом сверху чтобы glow не обрезался */}
+          <div style={{ paddingTop: "8px", paddingBottom: "4px" }}>
+            <CoachAvatar size={72} />
+          </div>
+          <div>
+            <p
               style={{
-                width: "26px",
-                height: "26px",
-                borderRadius: "50%",
-                border: "1px solid rgba(255,255,255,0.1)",
-                backgroundColor: ttsEnabled
-                  ? `${theme.primary}15`
-                  : "rgba(255,255,255,0.05)",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 0,
+                fontSize: "17px",
+                fontWeight: 700,
+                color: "white",
+                margin: 0,
               }}
             >
-              {ttsEnabled ? (
-                <span style={{ fontSize: "12px" }}>🔊</span>
-              ) : (
-                <VolumeX size={12} color="rgba(255,255,255,0.3)" />
-              )}
-            </button>
-          )}
+              {ru ? "AI Коуч" : "AI Coach"}
+            </p>
+            <p
+              style={{
+                fontSize: "12px",
+                color: "rgba(255,255,255,0.4)",
+                margin: 0,
+              }}
+            >
+              {ru ? "Твой персональный наставник" : "Your personal mentor"}
+            </p>
+          </div>
         </div>
 
-        {/* Лимит / статус */}
-        <p
-          style={{
-            fontSize: "10px",
-            color: isLimited ? "#fca5a5" : "rgba(255,255,255,0.35)",
-            margin: "2px 0 0 0",
-          }}
-        >
-          {hasSubscription === true
-            ? ru ? "Безлимитный доступ ✅" : "Unlimited ✅"
-            : isLimited
-            ? ru ? "Лимит исчерпан" : "Limit reached"
-            : ru
-            ? `${COACH_FREE_LIMIT - coachUsage} из ${COACH_FREE_LIMIT} запросов`
-            : `${COACH_FREE_LIMIT - coachUsage} of ${COACH_FREE_LIMIT}`}
-        </p>
-
-        {/* Статус состояния */}
-        <p
-          style={{
-            fontSize: "11px",
-            color: "rgba(255,255,255,0.3)",
-            margin: "2px 0 0 0",
-            height: "14px",
-          }}
-        >
-          {coachState === "listening" && (ru ? "Слушаю..." : "Listening...")}
-          {coachState === "thinking" && (ru ? "Думаю..." : "Thinking...")}
-          {coachState === "speaking" && (ru ? "Говорю..." : "Speaking...")}
-        </p>
-      </div>
-
-      {/* ===== ЛИМИТ ===== */}
-      {isLimited && (
-        <div
-          style={{
-            backgroundColor: "rgba(239,68,68,0.08)",
-            border: "1px solid rgba(239,68,68,0.2)",
-            borderRadius: "10px",
-            padding: "8px 12px",
-            margin: "8px 0",
-            textAlign: "center",
-            flexShrink: 0,
-          }}
-        >
-          <p
-            style={{
-              fontSize: "12px",
-              color: "#fca5a5",
-              margin: "0 0 6px 0",
-            }}
-          >
-            {ru
-              ? `Лимит ${COACH_FREE_LIMIT} запросов в день 🤖`
-              : `Limit ${COACH_FREE_LIMIT} requests/day 🤖`}
-          </p>
+        {/* Правая часть: кнопки */}
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {/* Кнопка Профиль */}
           <button
-            onClick={() => {
-              const tg = (window as any).Telegram?.WebApp;
-              tg?.openTelegramLink(
-                "https://t.me/aiplannerrubot?start=subscribe"
-              );
-            }}
+            onClick={onOpenProfile}
+            title={ru ? "Профиль" : "Profile"}
             style={{
-              height: "28px",
-              paddingLeft: "14px",
-              paddingRight: "14px",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: theme.primary,
-              color: "white",
-              fontSize: "11px",
-              fontWeight: 600,
+              width: "36px",
+              height: "36px",
+              borderRadius: "10px",
+              border: "1px solid rgba(255,255,255,0.12)",
+              backgroundColor: "rgba(255,255,255,0.08)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               cursor: "pointer",
             }}
           >
-            {ru ? "Подписка" : "Subscribe"}
+            <User size={16} color="rgba(255,255,255,0.7)" />
           </button>
-        </div>
-      )}
 
-      {/* ===== БЫСТРЫЕ ВОПРОСЫ ===== */}
-      {messages.length <= 1 && !isLimited && (
-        <div
-          style={{
-            display: "flex",
-            gap: "6px",
-            overflowX: "auto",
-            padding: "8px 0 4px",
-            flexShrink: 0,
-          }}
-        >
-          {quickPrompts.map((q) => (
+          {/* Кнопка очистить */}
+          {messages.length > 0 && (
             <button
-              key={q}
-              onClick={() => sendMessage(q)}
+              onClick={clearHistory}
+              title={ru ? "Очистить историю" : "Clear history"}
               style={{
-                whiteSpace: "nowrap",
-                backgroundColor: `${theme.primary}12`,
-                border: `1px solid ${theme.primary}25`,
-                borderRadius: "16px",
-                padding: "5px 12px",
-                fontSize: "11px",
-                color: theme.primary,
+                width: "36px",
+                height: "36px",
+                borderRadius: "10px",
+                border: "1px solid rgba(255,255,255,0.12)",
+                backgroundColor: "rgba(255,255,255,0.08)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
                 cursor: "pointer",
-                flexShrink: 0,
               }}
             >
-              {q}
+              <Trash2 size={15} color="rgba(255,255,255,0.5)" />
             </button>
-          ))}
+          )}
         </div>
-      )}
+      </div>
 
-      {/* ===== СООБЩЕНИЯ ===== */}
+      {/* ── Область сообщений ─────────────────────────────────────── */}
       <div
+        ref={scrollRef}
+        onScroll={handleScroll}
         style={{
           flex: 1,
           overflowY: "auto",
           overflowX: "hidden",
-          WebkitOverflowScrolling: "touch" as any,
           display: "flex",
           flexDirection: "column",
-          gap: "12px",
-          paddingTop: "8px",
-          paddingBottom: "4px",
+          gap: "10px",
+          paddingRight: "2px",
           minHeight: 0,
         }}
       >
-        {messages.map((msg, i) => (
+        {/* Приветствие */}
+        {messages.length === 0 && (
           <div
-            key={i}
             style={{
-              display: "flex",
-              justifyContent:
-                msg.role === "user" ? "flex-end" : "flex-start",
+              backgroundColor: "rgba(255,255,255,0.05)",
+              borderRadius: "14px",
+              padding: "14px 16px",
+              border: "1px solid rgba(255,255,255,0.07)",
             }}
           >
-            <div style={{ maxWidth: "85%", position: "relative" }}>
-              <div
+            <p
+              style={{
+                fontSize: "14px",
+                color: "rgba(255,255,255,0.7)",
+                margin: 0,
+                lineHeight: 1.55,
+              }}
+            >
+              {greeting}
+            </p>
+          </div>
+        )}
+
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            style={{
+              display: "flex",
+              justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+            }}
+          >
+            <div
+              style={{
+                maxWidth: "82%",
+                padding: "10px 13px",
+                borderRadius:
+                  msg.role === "user"
+                    ? "14px 14px 3px 14px"
+                    : "14px 14px 14px 3px",
+                backgroundColor:
+                  msg.role === "user"
+                    ? theme.primary
+                    : "rgba(255,255,255,0.08)",
+                border:
+                  msg.role === "assistant"
+                    ? "1px solid rgba(255,255,255,0.07)"
+                    : "none",
+              }}
+            >
+              <p
                 style={{
-                  padding: "9px 13px",
-                  borderRadius:
-                    msg.role === "user"
-                      ? "16px 16px 4px 16px"
-                      : "16px 16px 16px 4px",
-                  backgroundColor:
-                    msg.role === "user"
-                      ? theme.primary
-                      : "rgba(255,255,255,0.07)",
-                  border:
-                    msg.role === "assistant"
-                      ? "1px solid rgba(255,255,255,0.08)"
-                      : "none",
+                  fontSize: "14px",
+                  color: "white",
+                  margin: 0,
+                  lineHeight: 1.5,
+                  whiteSpace: "pre-wrap",
                 }}
               >
-                <p
-                  style={{
-                    fontSize: "14px",
-                    color:
-                      msg.role === "user"
-                        ? "white"
-                        : "rgba(255,255,255,0.9)",
-                    margin: 0,
-                    lineHeight: "1.5",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {msg.content}
-                </p>
-              </div>
-              <button
-                onClick={() => copyMessage(msg.content, i)}
-                style={{
-                  position: "absolute",
-                  bottom: "-18px",
-                  right: msg.role === "user" ? "0" : "auto",
-                  left: msg.role === "assistant" ? "0" : "auto",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "3px",
-                  padding: "2px 4px",
-                }}
-              >
-                {copiedId === i ? (
-                  <>
-                    <Check size={11} color="#22c55e" />
-                    <span style={{ fontSize: "10px", color: "#22c55e" }}>
-                      {ru ? "Скопировано" : "Copied"}
-                    </span>
-                  </>
-                ) : (
-                  <Copy size={11} color="rgba(255,255,255,0.2)" />
-                )}
-              </button>
+                {msg.text}
+              </p>
             </div>
           </div>
         ))}
 
+        {/* Индикатор загрузки */}
         {loading && (
           <div style={{ display: "flex", justifyContent: "flex-start" }}>
             <div
               style={{
                 padding: "10px 14px",
-                borderRadius: "16px 16px 16px 4px",
-                backgroundColor: "rgba(255,255,255,0.07)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: "14px 14px 14px 3px",
+                backgroundColor: "rgba(255,255,255,0.08)",
+                border: "1px solid rgba(255,255,255,0.07)",
                 display: "flex",
-                gap: "4px",
+                gap: "5px",
                 alignItems: "center",
               }}
             >
@@ -779,20 +387,11 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                     width: "6px",
                     height: "6px",
                     borderRadius: "50%",
-                    backgroundColor: "rgba(255,255,255,0.4)",
-                    animation: `bounce 1s ease-in-out ${i * 0.2}s infinite`,
+                    backgroundColor: theme.primary,
+                    animation: `bounce 1.2s ${i * 0.2}s infinite`,
                   }}
                 />
               ))}
-              <span
-                style={{
-                  fontSize: "11px",
-                  color: "rgba(255,255,255,0.4)",
-                  marginLeft: "4px",
-                }}
-              >
-                {ru ? "Думаю..." : "Thinking..."}
-              </span>
             </div>
           </div>
         )}
@@ -800,46 +399,41 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ===== ПОЛЕ ВВОДА ===== */}
-      <div
-        style={{
-          display: "flex",
-          gap: "6px",
-          alignItems: "flex-end",
-          paddingTop: "10px",
-          borderTop: "1px solid rgba(255,255,255,0.07)",
-          flexShrink: 0,
-        }}
-      >
-        {/* Микрофон */}
+      {/* Кнопка скролла вниз */}
+      {showScrollBtn && (
         <button
-          onClick={isListening ? stopListening : startListening}
-          disabled={isLimited}
+          onClick={scrollToBottom}
           style={{
-            width: "40px",
-            height: "40px",
-            minWidth: "40px",
+            position: "absolute",
+            bottom: "80px",
+            right: "20px",
+            width: "34px",
+            height: "34px",
             borderRadius: "50%",
-            backgroundColor: isListening
-              ? "#ef4444"
-              : "rgba(255,255,255,0.08)",
-            border: isListening ? "2px solid #fca5a5" : "none",
-            cursor: isLimited ? "default" : "pointer",
+            backgroundColor: theme.primary,
+            border: "none",
+            cursor: "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            flexShrink: 0,
-            opacity: isLimited ? 0.3 : 1,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            zIndex: 10,
           }}
         >
-          {isListening ? (
-            <MicOff size={16} color="white" />
-          ) : (
-            <Mic size={16} color="rgba(255,255,255,0.6)" />
-          )}
+          <ChevronDown size={18} color="white" />
         </button>
+      )}
 
-        {/* Текстовое поле */}
+      {/* ── Поле ввода ───────────────────────────────────────────── */}
+      <div
+        style={{
+          flexShrink: 0,
+          paddingTop: "10px",
+          display: "flex",
+          gap: "8px",
+          alignItems: "flex-end",
+        }}
+      >
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -849,71 +443,52 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
               sendMessage();
             }
           }}
-          placeholder={
-            isListening
-              ? ru ? "Говори..." : "Speaking..."
-              : isLimited
-              ? ru ? "Лимит..." : "Limit..."
-              : ru ? "Напиши коучу..." : "Message coach..."
-          }
-          disabled={isLimited}
+          placeholder={ru ? "Напиши коучу..." : "Message your coach..."}
           rows={1}
           style={{
             flex: 1,
-            backgroundColor: isListening
-              ? "rgba(239,68,68,0.1)"
-              : isLimited
-              ? "rgba(255,255,255,0.03)"
-              : "rgba(255,255,255,0.07)",
-            border: isListening
-              ? "1px solid rgba(239,68,68,0.3)"
-              : "1px solid rgba(255,255,255,0.1)",
-            borderRadius: "14px",
-            padding: "10px 12px",
-            fontSize: "16px",
-            color: isLimited ? "rgba(255,255,255,0.3)" : "white",
-            outline: "none",
+            backgroundColor: "rgba(255,255,255,0.07)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: "12px",
+            padding: "10px 13px",
+            color: "white",
+            fontSize: "14px",
             resize: "none",
-            maxHeight: "70px",
-            overflowY: "auto",
-            boxSizing: "border-box",
+            outline: "none",
             fontFamily: "inherit",
+            lineHeight: 1.4,
+            maxHeight: "100px",
+            overflowY: "auto",
+          }}
+          onInput={(e) => {
+            const t = e.currentTarget;
+            t.style.height = "auto";
+            t.style.height = Math.min(t.scrollHeight, 100) + "px";
           }}
         />
-
-        {/* Кнопка отправки */}
         <button
-          onClick={() => sendMessage()}
-          disabled={!input.trim() || loading || isLimited}
+          onClick={sendMessage}
+          disabled={!input.trim() || loading}
           style={{
             width: "40px",
             height: "40px",
-            minWidth: "40px",
-            borderRadius: "50%",
+            borderRadius: "12px",
             backgroundColor:
-              input.trim() && !loading && !isLimited
+              input.trim() && !loading
                 ? theme.primary
-                : "rgba(255,255,255,0.08)",
+                : "rgba(255,255,255,0.1)",
             border: "none",
-            cursor:
-              input.trim() && !loading && !isLimited ? "pointer" : "default",
+            cursor: input.trim() && !loading ? "pointer" : "default",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
+            transition: "background-color 0.2s",
           }}
         >
-          <Send size={15} color="white" />
+          <Send size={16} color="white" />
         </button>
       </div>
-
-      <style>{`
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); opacity: 0.4; }
-          50% { transform: translateY(-4px); opacity: 1; }
-        }
-        textarea::placeholder { color: rgba(255,255,255,0.3); }
-      `}</style>
     </div>
   );
 }
