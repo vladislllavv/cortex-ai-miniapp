@@ -1,457 +1,507 @@
-import { useState, useRef, useEffect } from "react";
-import {
-  useTaskStore,
-  checkSubscription,
-  getTelegramUserId,
-  saveChatHistory,
-  loadChatHistory,
-  loadChatFromFirebase,
-  ChatMessage,
-} from "@/lib/store";
+import { useState, useEffect, useRef } from "react";
 import { useI18nStore } from "@/lib/i18n";
-import { Send, Bot, Mic, MicOff, Copy, Check, Settings, X } from "lucide-react";
+import { useTheme } from "@/contexts/ThemeContext";
+import { Send, ChevronDown, Trash2, Lock } from "lucide-react";
+import { useAuthStore } from "@/lib/authStore";
 import { db } from "@/lib/firebase";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  deleteDoc,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+import { callGemini } from "@/lib/gemini";
 
-const ASSISTANT_NAME_KEY = "cortex-assistant-name";
-const AI_FREE_LIMIT = 5;
-const AI_USAGE_KEY = "cortex-ai-usage";
-const AI_WORKER_URL = "https://ancient-river-8a20.bubo-buboff.workers.dev";
-
-function getAssistantName() {
-  return localStorage.getItem(ASSISTANT_NAME_KEY) || "CortexAI";
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  ts: number;
 }
 
-function getAiUsage(): number {
-  try {
-    const s = localStorage.getItem(AI_USAGE_KEY);
-    if (s) {
-      const p = JSON.parse(s);
-      if (p.date === new Date().toISOString().split("T")[0]) return p.count;
-    }
-  } catch {}
-  return 0;
-}
-
-function setAiUsageStorage(count: number) {
-  localStorage.setItem(
-    AI_USAGE_KEY,
-    JSON.stringify({ date: new Date().toISOString().split("T")[0], count })
-  );
-}
-
-type MotivationMode = "off" | "soft" | "normal" | "hard";
-
-interface MotivationSettings {
-  mode: MotivationMode;
-  timesPerDay: number;
-  enabled: boolean;
-}
-
-const MOTIVATION_MODES = {
-  off:    { label: "Выключено", labelEn: "Off",    desc: "Уведомления не приходят",          descEn: "No notifications",        emoji: "🔕" },
-  soft:   { label: "Мягкий",    labelEn: "Soft",   desc: "Добрые и поддерживающие слова",    descEn: "Kind and supportive",      emoji: "🌸" },
-  normal: { label: "Обычный",   labelEn: "Normal", desc: "Сбалансированная мотивация",       descEn: "Balanced motivation",      emoji: "⚡" },
-  hard:   { label: "Жёсткий",   labelEn: "Hard",   desc: "Прямо и требовательно",            descEn: "Direct and demanding",     emoji: "🔥" },
-} as const;
-
-async function loadMotivationSettings(userId: string): Promise<MotivationSettings> {
-  const def: MotivationSettings = { mode: "normal", timesPerDay: 3, enabled: false };
-  if (userId === "unknown") return def;
-  try {
-    const s = await getDoc(doc(db, "users", userId, "settings", "motivation"));
-    if (s.exists()) return { ...def, ...s.data() as MotivationSettings };
-  } catch {}
-  return def;
-}
-
-async function saveMotivationSettingsDb(userId: string, s: MotivationSettings) {
-  if (userId === "unknown") return;
-  await setDoc(doc(db, "users", userId, "settings", "motivation"), s);
-}
-
-const DEFAULT_MESSAGE = (ru: boolean, name: string): ChatMessage => ({
-  role: "assistant",
-  content: ru
-    ? `Привет! 👋 Я ${name}, твой AI ассистент.\n\n• "напомни завтра в 10 встреча"\n• "купить молоко"\n• "что у меня сегодня?"\n• 🎤 Голосовой ввод\n\n⚙️ Настройки мотивации`
-    : `Hi! 👋 I'm ${name}.\n\n• "remind tomorrow at 10 meeting"\n• "buy milk"\n• "what today?"\n• 🎤 Voice input\n\n⚙️ Motivation settings`,
-  timestamp: Date.now(),
-});
-
-interface Props {
+interface AiProcessPageProps {
   embedded?: boolean;
 }
 
-export default function AiProcessPage({ embedded = false }: Props) {
-  const language = useI18nStore((s) => s.language);
-  const tasks = useTaskStore((s) => s.tasks);
-  const addTask = useTaskStore((s) => s.addTask);
-  const ru = language === "ru";
+const MAX_FREE_MESSAGES = 10;
 
-  const [name, setName] = useState(getAssistantName());
-  const [showNameEdit, setShowNameEdit] = useState(false);
-  const [showMotivation, setShowMotivation] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [motivation, setMotivation] = useState<MotivationSettings>({
-    mode: "normal", timesPerDay: 3, enabled: false,
-  });
-  const [motivationLoading, setMotivationLoading] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    const saved = loadChatHistory();
-    return saved.length > 0 ? saved as ChatMessage[] : [DEFAULT_MESSAGE(ru, getAssistantName())];
-  });
+// Путь к настройкам мотивации (единый!)
+const motivationPath = (uid: string) =>
+  doc(db, "users", uid, "settings", "motivation");
+
+type MotivationMode = "soft" | "balanced" | "hard";
+
+const MOTIVATION_LABELS: Record<MotivationMode, { ru: string; en: string; emoji: string }> = {
+  soft:     { ru: "Мягкий",     en: "Soft",     emoji: "🌱" },
+  balanced: { ru: "Баланс",     en: "Balanced", emoji: "⚖️" },
+  hard:     { ru: "Жёсткий",   en: "Hard",     emoji: "💪" },
+};
+
+function getSystemPrompt(mode: MotivationMode, ru: boolean, userName: string): string {
+  const name = userName ? `, ${userName}` : "";
+  if (ru) {
+    const base = `Ты мощный AI-ассистент по продуктивности${name}. Помогай планировать задачи, управлять временем и достигать целей.`;
+    if (mode === "soft")
+      return `${base} Общайся мягко, поддерживающе, с заботой. Хвали за любые успехи.`;
+    if (mode === "hard")
+      return `${base} Будь прямым и требовательным. Не давай оправданий, фокусируй на результате.`;
+    return `${base} Держи баланс между поддержкой и требовательностью.`;
+  } else {
+    const base = `You are a powerful AI productivity assistant${name}. Help with task planning, time management and goal achievement.`;
+    if (mode === "soft")
+      return `${base} Be gentle, supportive and caring. Praise any progress.`;
+    if (mode === "hard")
+      return `${base} Be direct and demanding. No excuses, focus on results.`;
+    return `${base} Balance support with accountability.`;
+  }
+}
+
+export default function AiProcessPage({ embedded }: AiProcessPageProps) {
+  const language = useI18nStore((s) => s.language);
+  const { theme } = useTheme();
+  const ru = language === "ru";
+  const { user } = useAuthStore();
+
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [hasSub, setHasSub] = useState<boolean | null>(null);
-  const [usage, setUsage] = useState(() => getAiUsage());
-  const [chatLoaded, setChatLoaded] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-  const [copiedId, setCopiedId] = useState<number | null>(null);
-  const sendingRef = useRef(false);
-  const recognitionRef = useRef<any>(null);
+  const [msgCount, setMsgCount] = useState(0);
+  const [isPro, setIsPro] = useState(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [motivationMode, setMotivationMode] = useState<MotivationMode>("balanced");
+  const [userName, setUserName] = useState("");
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const userId = getTelegramUserId();
+  const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Загрузка данных пользователя
   useEffect(() => {
-    checkSubscription(userId).then(setHasSub);
-    loadMotivationSettings(userId).then(setMotivation);
-    if (userId !== "unknown") {
-      loadChatFromFirebase(userId, "ai-assistant").then((msgs) => {
-        if (msgs.length > 0) setMessages(msgs as ChatMessage[]);
-        setChatLoaded(true);
-      });
-    } else {
-      setChatLoaded(true);
-    }
-  }, []);
+    if (!user?.uid) return;
+    getDoc(doc(db, "users", user.uid)).then((snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setIsPro(!!d.isPro);
+        setUserName(d.displayName || d.name || "");
+      }
+    });
+  }, [user?.uid]);
 
+  // Загрузка настроек мотивации (единый путь)
   useEffect(() => {
-    if (hasSub === true) setUsage(0);
-  }, [hasSub]);
+    if (!user?.uid) return;
+    getDoc(motivationPath(user.uid)).then((snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.mode) setMotivationMode(d.mode as MotivationMode);
+      }
+    });
+  }, [user?.uid]);
 
+  // Подписка на сообщения
   useEffect(() => {
-    if (chatLoaded) saveChatHistory(messages);
-  }, [messages, chatLoaded]);
+    if (!user?.uid) return;
+    const q = query(
+      collection(db, "users", user.uid, "aiMessages"),
+      orderBy("ts", "asc")
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const msgs = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as Omit<Message, "id">),
+      }));
+      setMessages(msgs);
+      setMsgCount(msgs.filter((m) => m.role === "user").length);
+    });
+    return unsub;
+  }, [user?.uid]);
 
+  // Автоскролл
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => () => {
-    recognitionRef.current?.abort();
-    recognitionRef.current = null;
-  }, []);
-
-  const isLimited = hasSub === false && usage >= AI_FREE_LIMIT;
-
-  async function saveMotivation(s: MotivationSettings) {
-    const tg = (window as any).Telegram?.WebApp;
-    if (s.enabled && s.mode !== "off" && tg) {
-      setMotivationLoading(true);
-      tg.requestWriteAccess(async (granted: boolean) => {
-        if (granted) {
-          setMotivation(s);
-          await saveMotivationSettingsDb(userId, s);
-          setMessages((p) => [...p, {
-            role: "assistant",
-            content: ru
-              ? `${MOTIVATION_MODES[s.mode].emoji} Мотивация настроена! Режим: ${MOTIVATION_MODES[s.mode].label}, ${s.timesPerDay}× в день 💪`
-              : `${MOTIVATION_MODES[s.mode].emoji} Motivation set! Mode: ${MOTIVATION_MODES[s.mode].labelEn}, ${s.timesPerDay}×/day 💪`,
-            timestamp: Date.now(),
-          }]);
-          tg.showAlert(ru ? "✅ Мотивация включена!" : "✅ Motivation enabled!");
-        } else {
-          tg.showAlert(ru ? "❌ Доступ отклонён." : "❌ Access denied.");
-        }
-        setMotivationLoading(false);
-        setShowMotivation(false);
-      });
-    } else {
-      setMotivation(s);
-      await saveMotivationSettingsDb(userId, s);
-      setMotivationLoading(false);
-      setShowMotivation(false);
-    }
-  }
-
-  const startListening = () => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { (window as any).Telegram?.WebApp?.showAlert(ru ? "Голосовой ввод не поддерживается" : "Voice not supported"); return; }
-    const r = new SR();
-    r.lang = ru ? "ru-RU" : "en-US";
-    r.continuous = false;
-    r.interimResults = false;
-    r.onstart = () => setIsListening(true);
-    r.onresult = (e: any) => { setInput(e.results[0][0].transcript); setIsListening(false); };
-    r.onerror = () => setIsListening(false);
-    r.onend = () => setIsListening(false);
-    recognitionRef.current = r;
-    r.start();
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 80);
   };
 
-  const stopListening = () => {
-    recognitionRef.current?.abort();
-    recognitionRef.current = null;
-    setIsListening(false);
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const copyMessage = async (content: string, i: number) => {
-    try { await navigator.clipboard.writeText(content); } catch {
-      const el = document.createElement("textarea");
-      el.value = content;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
-    }
-    setCopiedId(i);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
+  const canSend = isPro || msgCount < MAX_FREE_MESSAGES;
+  const mLabel = MOTIVATION_LABELS[motivationMode];
 
-  const sendMessage = async (text?: string) => {
-    if (sendingRef.current) return;
-    const msg = (text || input).trim();
-    if (!msg || loading) return;
-
-    if (isLimited) {
-      const tg = (window as any).Telegram?.WebApp;
-      tg?.showAlert(ru ? `Лимит ${AI_FREE_LIMIT} запросов 🤖` : `Limit ${AI_FREE_LIMIT} 🤖`);
-      tg?.openTelegramLink("https://t.me/aiplannerrubot?start=subscribe");
-      return;
-    }
-
-    sendingRef.current = true;
-    setMessages((p) => [...p, { role: "user", content: msg, timestamp: Date.now() }]);
+  const sendMessage = async () => {
+    if (!input.trim() || !user?.uid || loading || !canSend) return;
+    const text = input.trim();
     setInput("");
     setLoading(true);
 
-    if (hasSub === false) {
-      const nc = usage + 1;
-      setUsage(nc);
-      setAiUsageStorage(nc);
-    }
+    await addDoc(collection(db, "users", user.uid, "aiMessages"), {
+      role: "user",
+      text,
+      ts: Date.now(),
+    });
 
     try {
-      const activeTasks = tasks.filter((t) => t.status !== "done").slice(0, 8);
-      const systemPrompt = `Ты AI ассистент планировщика CortexAI. Время: ${new Date().toLocaleString("ru-RU")}.
-Активные задачи: ${activeTasks.length > 0
-        ? activeTasks.map((t) => `${t.title}${t.dueDate ? ` (${new Date(t.dueDate).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })})` : " (без даты)"}`).join(", ")
-        : "нет задач"}
-ВАЖНО: Если пользователь хочет создать задачу — добавь в конец:
-TASK_JSON:{"title":"название","dueDate":"ISO_или_null","priority":"medium","repeat":"none"}
-Правила: коротко (1-2 предл.), ${ru ? "только русский" : "only English"}, эмодзи, dueDate=null если нет времени.`;
+      const history = messages.slice(-14).map((m) => ({
+        role: m.role,
+        parts: [{ text: m.text }],
+      }));
 
-      const history = messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
-      history.push({ role: "user", content: msg });
+      const systemPrompt = getSystemPrompt(motivationMode, ru, userName);
+      const reply = await callGemini(text, history, systemPrompt);
 
-      const res = await fetch(AI_WORKER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, systemPrompt }),
+      await addDoc(collection(db, "users", user.uid, "aiMessages"), {
+        role: "assistant",
+        text: reply,
+        ts: Date.now() + 1,
       });
-      if (!res.ok) throw new Error(`Worker ${res.status}`);
-      const data = await res.json();
-      const aiResponse = data.content;
-
-      // Парсим задачу
-      const match = aiResponse.match(/TASK_JSON:(\{[^}]+\})/);
-      let finalText = aiResponse.replace(/TASK_JSON:\{[^}]+\}/, "").trim();
-
-      if (match) {
-        try {
-          const task = JSON.parse(match[1]);
-          if (task.title?.length > 1) {
-            let dueDate: string | undefined;
-            if (task.dueDate) {
-              const d = new Date(task.dueDate);
-              if (!isNaN(d.getTime()) && d > new Date()) dueDate = task.dueDate;
-            }
-            const saved = await addTask({
-              title: task.title,
-              dueDate,
-              priority: task.priority || "medium",
-              status: "todo",
-              isAiCreated: true,
-              repeat: task.repeat || "none",
-              type: "task",
-              description: "",
-              items: [],
-            });
-            const timeStr = dueDate
-              ? new Date(dueDate).toLocaleString(ru ? "ru-RU" : "en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
-              : ru ? "без срока" : "no deadline";
-            finalText = `✅ ${ru ? "Задача добавлена" : "Task added"}!\n📌 ${task.title}\n⏰ ${timeStr}\n\n${finalText}`;
-          }
-        } catch {}
-      }
-
-      setMessages((p) => [...p, { role: "assistant", content: finalText, timestamp: Date.now() }]);
     } catch {
-      setMessages((p) => [...p, { role: "assistant", content: ru ? "⚠️ Ошибка. Попробуй ещё раз." : "⚠️ Error. Try again.", timestamp: Date.now() }]);
+      await addDoc(collection(db, "users", user.uid, "aiMessages"), {
+        role: "assistant",
+        text: ru
+          ? "Произошла ошибка. Попробуй ещё раз."
+          : "An error occurred. Please try again.",
+        ts: Date.now() + 1,
+      });
     } finally {
       setLoading(false);
-      sendingRef.current = false;
     }
   };
 
-  const height = embedded ? "100%" : "calc(100vh - 120px)";
+  const clearHistory = async () => {
+    if (!user?.uid) return;
+    const { getDocs } = await import("firebase/firestore");
+    const snap = await getDocs(
+      collection(db, "users", user.uid, "aiMessages")
+    );
+    await Promise.all(
+      snap.docs.map((d) =>
+        deleteDoc(doc(db, "users", user.uid!, "aiMessages", d.id))
+      )
+    );
+  };
+
+  const DEFAULT_MESSAGE = ru
+    ? `Привет${userName ? ", " + userName : ""}! ⚡ Я твой AI-ассистент.\n\nМогу помочь:\n• 📋 Планировать задачи и день\n• ⏰ Управлять временем\n• 🎯 Ставить и достигать цели\n• 💡 Давать советы по продуктивности\n\nРежим мотивации: ${mLabel.emoji} ${ru ? mLabel.ru : mLabel.en}\nНастрой мотивацию в Ещё → Настройки`
+    : `Hey${userName ? ", " + userName : ""}! ⚡ I'm your AI assistant.\n\nI can help:\n• 📋 Plan tasks and your day\n• ⏰ Manage your time\n• 🎯 Set and achieve goals\n• 💡 Give productivity tips\n\nMotivation mode: ${mLabel.emoji} ${mLabel.en}\nCustomize motivation in More → Settings`;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height, maxHeight: height, overflow: "hidden" }}>
-
-      {/* Заголовок */}
-      <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px", flexShrink: 0 }}>
-        <div style={{ width: "36px", height: "36px", borderRadius: "10px", backgroundColor: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <Bot size={18} color="#3b82f6" />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <p style={{ fontSize: "15px", fontWeight: 700, color: "white", margin: 0 }}>{name}</p>
-            <span style={{ fontSize: "10px", backgroundColor: "rgba(59,130,246,0.2)", color: "#60a5fa", padding: "1px 6px", borderRadius: "8px" }}>AI ⚡</span>
-            <button onClick={() => { setNewName(name); setShowNameEdit(true); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "12px", color: "rgba(255,255,255,0.3)" }}>✏️</button>
-          </div>
-          <p style={{ fontSize: "11px", color: isLimited ? "#fca5a5" : "rgba(255,255,255,0.4)", margin: 0 }}>
-            {hasSub === null ? "..." : hasSub ? (ru ? "Подписка ✅" : "Sub ✅") : isLimited ? (ru ? "Лимит" : "Limit") : `${AI_FREE_LIMIT - usage}/${AI_FREE_LIMIT}`}
-            {" • "}{MOTIVATION_MODES[motivation.mode].emoji} {ru ? MOTIVATION_MODES[motivation.mode].label : MOTIVATION_MODES[motivation.mode].labelEn}
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        minHeight: 0,
+        overflow: "hidden",
+        paddingBottom: "68px",
+      }}
+    >
+      {/* ── Шапка ─────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          paddingBottom: "10px",
+          flexShrink: 0,
+        }}
+      >
+        <div>
+          <p
+            style={{
+              fontSize: "17px",
+              fontWeight: 700,
+              color: "white",
+              margin: 0,
+            }}
+          >
+            {ru ? "AI Ассистент" : "AI Assistant"}
+          </p>
+          {/* Режим мотивации — только информационно, без кнопки настройки */}
+          <p
+            style={{
+              fontSize: "11px",
+              color: "rgba(255,255,255,0.35)",
+              margin: "2px 0 0",
+            }}
+          >
+            {mLabel.emoji} {ru ? mLabel.ru : mLabel.en}
+            {!isPro && (
+              <span style={{ marginLeft: "8px" }}>
+                · {MAX_FREE_MESSAGES - msgCount > 0
+                  ? `${MAX_FREE_MESSAGES - msgCount} ${ru ? "сообщ." : "msg left"}`
+                  : ru ? "Лимит" : "Limit"}
+              </span>
+            )}
           </p>
         </div>
-        <button onClick={() => setShowMotivation(true)} style={{ width: "34px", height: "34px", borderRadius: "10px", backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-          <Settings size={16} color="rgba(255,255,255,0.5)" />
-        </button>
+
+        {/* Кнопка очистить (без шестерёнки!) */}
+        {messages.length > 0 && (
+          <button
+            onClick={clearHistory}
+            title={ru ? "Очистить историю" : "Clear history"}
+            style={{
+              width: "36px",
+              height: "36px",
+              borderRadius: "10px",
+              border: "1px solid rgba(255,255,255,0.1)",
+              backgroundColor: "rgba(255,255,255,0.06)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <Trash2 size={15} color="rgba(255,255,255,0.5)" />
+          </button>
+        )}
       </div>
 
-      {/* Редактирование имени */}
-      {showNameEdit && (
-        <div style={{ backgroundColor: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "12px", padding: "10px 12px", marginBottom: "8px", flexShrink: 0 }}>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { localStorage.setItem(ASSISTANT_NAME_KEY, newName.trim()); setName(newName.trim()); setShowNameEdit(false); } }} placeholder={ru ? "Имя..." : "Name..."} style={{ flex: 1, height: "34px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "rgba(255,255,255,0.07)", paddingLeft: "10px", fontSize: "14px", color: "white", outline: "none", fontFamily: "inherit" }} />
-            <button onClick={() => { localStorage.setItem(ASSISTANT_NAME_KEY, newName.trim()); setName(newName.trim()); setShowNameEdit(false); }} style={{ height: "34px", paddingLeft: "12px", paddingRight: "12px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>OK</button>
-            <button onClick={() => setShowNameEdit(false)} style={{ height: "34px", paddingLeft: "10px", paddingRight: "10px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.1)", backgroundColor: "transparent", color: "rgba(255,255,255,0.5)", fontSize: "12px", cursor: "pointer" }}>✕</button>
+      {/* ── Лимит исчерпан ────────────────────────────────────────── */}
+      {!canSend && (
+        <div
+          style={{
+            backgroundColor: "rgba(239,68,68,0.12)",
+            border: "1px solid rgba(239,68,68,0.25)",
+            borderRadius: "12px",
+            padding: "12px 14px",
+            marginBottom: "10px",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            flexShrink: 0,
+          }}
+        >
+          <Lock size={16} color="#ef4444" />
+          <p style={{ fontSize: "13px", color: "#ef4444", margin: 0 }}>
+            {ru
+              ? "Бесплатный лимит исчерпан. Перейди на Pro для продолжения."
+              : "Free limit reached. Upgrade to Pro to continue."}
+          </p>
+        </div>
+      )}
+
+      {/* ── Область сообщений ─────────────────────────────────────── */}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          overflowX: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+          paddingRight: "2px",
+          minHeight: 0,
+        }}
+      >
+        {/* Приветствие */}
+        {messages.length === 0 && (
+          <div
+            style={{
+              backgroundColor: "rgba(255,255,255,0.05)",
+              borderRadius: "14px",
+              padding: "14px 16px",
+              border: "1px solid rgba(255,255,255,0.07)",
+            }}
+          >
+            <p
+              style={{
+                fontSize: "14px",
+                color: "rgba(255,255,255,0.7)",
+                margin: 0,
+                lineHeight: 1.6,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {DEFAULT_MESSAGE}
+            </p>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Лимит */}
-      {isLimited && (
-        <div style={{ backgroundColor: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px", flexShrink: 0, textAlign: "center" }}>
-          <p style={{ fontSize: "12px", color: "#fca5a5", margin: "0 0 6px 0" }}>{ru ? `Лимит ${AI_FREE_LIMIT} запросов 🤖` : `Limit ${AI_FREE_LIMIT} 🤖`}</p>
-          <button onClick={() => (window as any).Telegram?.WebApp?.openTelegramLink("https://t.me/aiplannerrubot?start=subscribe")} style={{ height: "30px", paddingLeft: "14px", paddingRight: "14px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
-            {ru ? "Оформить подписку" : "Get subscription"}
-          </button>
-        </div>
-      )}
-
-      {/* Быстрые вопросы */}
-      {messages.length <= 1 && (
-        <div style={{ display: "flex", gap: "6px", overflowX: "auto", marginBottom: "8px", paddingBottom: "2px", flexShrink: 0 }}>
-          {(ru
-            ? ["что у меня сегодня?", "напомни завтра утром", "купить продукты"]
-            : ["what today?", "remind tomorrow morning", "buy groceries"]
-          ).map((q) => (
-            <button key={q} onClick={() => sendMessage(q)} style={{ whiteSpace: "nowrap", backgroundColor: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "16px", padding: "5px 10px", fontSize: "11px", color: "#93c5fd", cursor: "pointer", flexShrink: 0 }}>
-              {q}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Сообщения */}
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", WebkitOverflowScrolling: "touch" as any, display: "flex", flexDirection: "column", gap: "12px", paddingBottom: "4px", minHeight: 0 }}>
-        {messages.map((msg, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
-            <div style={{ maxWidth: "85%", position: "relative" }}>
-              <div style={{ padding: "9px 13px", borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px", backgroundColor: msg.role === "user" ? "#3b82f6" : "rgba(255,255,255,0.07)", border: msg.role === "assistant" ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
-                <p style={{ fontSize: "14px", color: msg.role === "user" ? "white" : "rgba(255,255,255,0.9)", margin: 0, lineHeight: "1.5", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{msg.content}</p>
-              </div>
-              <button onClick={() => copyMessage(msg.content, i)} style={{ position: "absolute", bottom: "-18px", right: msg.role === "user" ? "0" : "auto", left: msg.role === "assistant" ? "0" : "auto", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px", padding: "2px 4px" }}>
-                {copiedId === i ? <><Check size={11} color="#22c55e" /><span style={{ fontSize: "10px", color: "#22c55e" }}>{ru ? "Скопировано" : "Copied"}</span></> : <Copy size={11} color="rgba(255,255,255,0.2)" />}
-              </button>
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            style={{
+              display: "flex",
+              justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+            }}
+          >
+            <div
+              style={{
+                maxWidth: "82%",
+                padding: "10px 13px",
+                borderRadius:
+                  msg.role === "user"
+                    ? "14px 14px 3px 14px"
+                    : "14px 14px 14px 3px",
+                backgroundColor:
+                  msg.role === "user"
+                    ? theme.primary
+                    : "rgba(255,255,255,0.08)",
+                border:
+                  msg.role === "assistant"
+                    ? "1px solid rgba(255,255,255,0.07)"
+                    : "none",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: "14px",
+                  color: "white",
+                  margin: 0,
+                  lineHeight: 1.5,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {msg.text}
+              </p>
             </div>
           </div>
         ))}
 
+        {/* Индикатор загрузки */}
         {loading && (
           <div style={{ display: "flex", justifyContent: "flex-start" }}>
-            <div style={{ padding: "10px 14px", borderRadius: "16px 16px 16px 4px", backgroundColor: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: "4px", alignItems: "center" }}>
-              {[0,1,2].map((i) => <div key={i} style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "rgba(255,255,255,0.4)", animation: `bounce 1s ease-in-out ${i * 0.2}s infinite` }} />)}
-              <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", marginLeft: "4px" }}>{ru ? "Думаю..." : "Thinking..."}</span>
+            <div
+              style={{
+                padding: "10px 14px",
+                borderRadius: "14px 14px 14px 3px",
+                backgroundColor: "rgba(255,255,255,0.08)",
+                border: "1px solid rgba(255,255,255,0.07)",
+                display: "flex",
+                gap: "5px",
+                alignItems: "center",
+              }}
+            >
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    backgroundColor: theme.primary,
+                    animation: `bounce 1.2s ${i * 0.2}s infinite`,
+                  }}
+                />
+              ))}
             </div>
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Поле ввода */}
-      <div style={{ display: "flex", gap: "6px", alignItems: "flex-end", paddingTop: "16px", borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
-        <button onClick={isListening ? stopListening : startListening} disabled={isLimited} style={{ width: "40px", height: "40px", minWidth: "40px", borderRadius: "50%", backgroundColor: isListening ? "#ef4444" : "rgba(255,255,255,0.08)", border: isListening ? "2px solid #fca5a5" : "none", cursor: isLimited ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, opacity: isLimited ? 0.3 : 1 }}>
-          {isListening ? <MicOff size={16} color="white" /> : <Mic size={16} color="rgba(255,255,255,0.6)" />}
+      {/* Кнопка скролла вниз */}
+      {showScrollBtn && (
+        <button
+          onClick={scrollToBottom}
+          style={{
+            position: "absolute",
+            bottom: "80px",
+            right: "20px",
+            width: "34px",
+            height: "34px",
+            borderRadius: "50%",
+            backgroundColor: theme.primary,
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            zIndex: 10,
+          }}
+        >
+          <ChevronDown size={18} color="white" />
         </button>
-        <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder={isListening ? (ru ? "Говори..." : "Speaking...") : isLimited ? (ru ? "Лимит..." : "Limit...") : (ru ? "Напиши задачу или вопрос..." : "Write task or question...")} disabled={isLimited} rows={1} style={{ flex: 1, backgroundColor: isListening ? "rgba(239,68,68,0.1)" : isLimited ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.07)", border: isListening ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(255,255,255,0.1)", borderRadius: "14px", padding: "10px 12px", fontSize: "16px", color: isLimited ? "rgba(255,255,255,0.3)" : "white", outline: "none", resize: "none", maxHeight: "70px", overflowY: "auto", boxSizing: "border-box", fontFamily: "inherit" }} />
-        <button onClick={() => sendMessage()} disabled={!input.trim() || loading || isLimited} style={{ width: "40px", height: "40px", minWidth: "40px", borderRadius: "50%", backgroundColor: input.trim() && !loading && !isLimited ? "#3b82f6" : "rgba(255,255,255,0.08)", border: "none", cursor: input.trim() && !loading && !isLimited ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <Send size={15} color="white" />
-        </button>
-      </div>
-
-      {/* Модалка мотивации */}
-      {showMotivation && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, backgroundColor: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }} onClick={(e) => { if (e.target === e.currentTarget) setShowMotivation(false); }}>
-          <div style={{ backgroundColor: "#1e293b", borderRadius: "20px", padding: "20px", width: "100%", maxWidth: "340px", border: "1px solid rgba(255,255,255,0.08)", maxHeight: "85vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <p style={{ fontSize: "16px", fontWeight: 700, color: "white", margin: 0 }}>💪 {ru ? "Мотивация" : "Motivation"}</p>
-              <button onClick={() => setShowMotivation(false)} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={18} color="rgba(255,255,255,0.4)" /></button>
-            </div>
-
-            {/* Переключатель */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", backgroundColor: "rgba(255,255,255,0.05)", borderRadius: "12px", padding: "12px 14px", marginBottom: "14px", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <div>
-                <p style={{ fontSize: "14px", fontWeight: 600, color: "white", margin: 0 }}>{ru ? "Уведомления" : "Notifications"}</p>
-                <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{motivation.enabled ? (ru ? "Включены" : "Enabled") : (ru ? "Выключены" : "Disabled")}</p>
-              </div>
-              <div onClick={() => setMotivation((p) => ({ ...p, enabled: !p.enabled }))} style={{ position: "relative", width: "44px", height: "24px", borderRadius: "12px", backgroundColor: motivation.enabled ? "#3b82f6" : "rgba(255,255,255,0.15)", cursor: "pointer", transition: "background-color 0.2s" }}>
-                <div style={{ position: "absolute", top: "2px", left: motivation.enabled ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", backgroundColor: "white", boxShadow: "0 1px 3px rgba(0,0,0,0.3)", transition: "left 0.2s" }} />
-              </div>
-            </div>
-
-            {motivation.enabled && (
-              <>
-                <p style={{ fontSize: "12px", fontWeight: 600, color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0", textTransform: "uppercase", letterSpacing: "0.5px" }}>{ru ? "Режим" : "Mode"}</p>
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
-                  {(Object.entries(MOTIVATION_MODES) as [MotivationMode, typeof MOTIVATION_MODES[MotivationMode]][]).map(([key, info]) => (
-                    <button key={key} onClick={() => setMotivation((p) => ({ ...p, mode: key }))} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 14px", borderRadius: "12px", border: motivation.mode === key ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.08)", backgroundColor: motivation.mode === key ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.04)", cursor: "pointer", textAlign: "left", width: "100%" }}>
-                      <span style={{ fontSize: "22px" }}>{info.emoji}</span>
-                      <div style={{ flex: 1 }}>
-                        <p style={{ fontSize: "14px", fontWeight: 600, color: motivation.mode === key ? "#60a5fa" : "white", margin: 0 }}>{ru ? info.label : info.labelEn}</p>
-                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{ru ? info.desc : info.descEn}</p>
-                      </div>
-                      {motivation.mode === key && <div style={{ width: "18px", height: "18px", borderRadius: "50%", backgroundColor: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center" }}><Check size={11} color="white" /></div>}
-                    </button>
-                  ))}
-                </div>
-
-                <p style={{ fontSize: "12px", fontWeight: 600, color: "rgba(255,255,255,0.4)", margin: "0 0 8px 0", textTransform: "uppercase", letterSpacing: "0.5px" }}>{ru ? "Раз в день" : "Per day"}</p>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "16px" }}>
-                  {[1,2,3,4,5].map((n) => (
-                    <button key={n} onClick={() => setMotivation((p) => ({ ...p, timesPerDay: n }))} style={{ height: "44px", borderRadius: "12px", border: motivation.timesPerDay === n ? "1px solid #3b82f6" : "1px solid rgba(255,255,255,0.08)", backgroundColor: motivation.timesPerDay === n ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.04)", color: motivation.timesPerDay === n ? "#60a5fa" : "rgba(255,255,255,0.6)", fontSize: "16px", fontWeight: motivation.timesPerDay === n ? 700 : 400, cursor: "pointer" }}>{n}×</button>
-                  ))}
-                </div>
-
-                <div style={{ backgroundColor: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: "10px", padding: "10px 12px", marginBottom: "16px" }}>
-                  <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>💡 {ru ? "Проверь: /test_motivation боту @aiplannerrubot" : "Test: /test_motivation to @aiplannerrubot"}</p>
-                </div>
-              </>
-            )}
-
-            <button onClick={() => saveMotivation(motivation)} disabled={motivationLoading} style={{ width: "100%", height: "46px", borderRadius: "12px", border: "none", backgroundColor: "#3b82f6", fontSize: "14px", fontWeight: 600, color: "white", cursor: motivationLoading ? "default" : "pointer", opacity: motivationLoading ? 0.7 : 1 }}>
-              {motivationLoading ? (ru ? "Запрашиваем доступ..." : "Requesting...") : (ru ? "Сохранить" : "Save")}
-            </button>
-          </div>
-        </div>
       )}
 
-      <style>{`
-        @keyframes bounce { 0%,100%{transform:translateY(0);opacity:.4} 50%{transform:translateY(-4px);opacity:1} }
-        textarea::placeholder { color:rgba(255,255,255,.3); }
-      `}</style>
+      {/* ── Поле ввода ───────────────────────────────────────────── */}
+      <div
+        style={{
+          flexShrink: 0,
+          paddingTop: "10px",
+          display: "flex",
+          gap: "8px",
+          alignItems: "flex-end",
+        }}
+      >
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              sendMessage();
+            }
+          }}
+          placeholder={
+            canSend
+              ? ru ? "Напиши ассистенту..." : "Message assistant..."
+              : ru ? "Лимит исчерпан" : "Limit reached"
+          }
+          disabled={!canSend}
+          rows={1}
+          style={{
+            flex: 1,
+            backgroundColor: canSend
+              ? "rgba(255,255,255,0.07)"
+              : "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: "12px",
+            padding: "10px 13px",
+            color: "white",
+            fontSize: "14px",
+            resize: "none",
+            outline: "none",
+            fontFamily: "inherit",
+            lineHeight: 1.4,
+            maxHeight: "100px",
+            overflowY: "auto",
+            opacity: canSend ? 1 : 0.5,
+          }}
+          onInput={(e) => {
+            const t = e.currentTarget;
+            t.style.height = "auto";
+            t.style.height = Math.min(t.scrollHeight, 100) + "px";
+          }}
+        />
+        <button
+          onClick={sendMessage}
+          disabled={!input.trim() || loading || !canSend}
+          style={{
+            width: "40px",
+            height: "40px",
+            borderRadius: "12px",
+            backgroundColor:
+              input.trim() && !loading && canSend
+                ? theme.primary
+                : "rgba(255,255,255,0.1)",
+            border: "none",
+            cursor:
+              input.trim() && !loading && canSend ? "pointer" : "default",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            transition: "background-color 0.2s",
+          }}
+        >
+          <Send size={16} color="white" />
+        </button>
+      </div>
     </div>
   );
 }
