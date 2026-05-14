@@ -13,7 +13,6 @@ import { db } from "@/lib/firebase";
 import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 import { Send, Mic, MicOff, VolumeX, Copy, Check, User } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
-import { useAppNavigation } from "@/contexts/AppNavigationContext";
 import CoachAvatar, { CoachState } from "@/components/CoachAvatar";
 
 const AI_WORKER_URL = "https://ancient-river-8a20.bubo-buboff.workers.dev";
@@ -92,7 +91,6 @@ function isTTSAvailable(): boolean {
 
 export default function CoachPage({ embedded = false }: { embedded?: boolean }) {
   const language = useI18nStore((state) => state.language);
-  const { openMoreSettings } = useAppNavigation();
   const tasks = useTaskStore((state) => state.tasks);
   const addTask = useTaskStore((state) => state.addTask);
   const { theme } = useTheme();
@@ -123,7 +121,6 @@ export default function CoachPage({ embedded = false }: { embedded?: boolean }) 
     checkSubscription(userId).then(setHasSubscription);
 
     if (userId !== "unknown") {
-      // Загрузка профиля и целей
       getDoc(doc(db, "users", userId, "settings", "profile"))
         .then((snap) => {
           if (snap.exists()) setProfile(snap.data() as UserProfile);
@@ -138,7 +135,6 @@ export default function CoachPage({ embedded = false }: { embedded?: boolean }) 
         })
         .catch(() => {});
 
-      // Загрузка чата из Firebase
       loadChatFromFirebase(userId, "ai-coach").then((firebaseMessages) => {
         if (firebaseMessages.length > 0) {
           setMessages(firebaseMessages as ChatMessage[]);
@@ -173,7 +169,6 @@ export default function CoachPage({ embedded = false }: { embedded?: boolean }) 
     };
   }, []);
 
-  // Приветствие при первом открытии
   useEffect(() => {
     if (chatLoaded && messages.length === 0) {
       const welcome: ChatMessage = {
@@ -366,7 +361,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
       const data = await response.json();
       const aiResponse = data.content || "⚠️ Нет ответа";
 
-      // Парсим и создаём цели
       const goalsMatch = aiResponse.match(/GOALS_JSON:(\[[\s\S]*?\])/);
       let addedCount = 0;
 
@@ -380,7 +374,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                 .substr(2, 6)}`;
               const weekStart = getWeekStart();
 
-              // Сохраняем цель
               if (userId !== "unknown") {
                 setDoc(
                   doc(db, "users", userId, "weeklyGoals", goalId),
@@ -396,7 +389,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
                 ).catch(() => {});
               }
 
-              // Создаём задачу через store
               await addTask({
                 title: `🎯 ${g.text.trim()}`,
                 dueDate: g.dueDate || undefined,
@@ -489,7 +481,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
 
   return (
     <div style={outerStyle}>
-      {/* ===== ПЕРСОНАЖ + ЗАГОЛОВОК ===== */}
       <div
         style={{
           display: "flex",
@@ -536,7 +527,15 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
           </p>
           <button
             type="button"
-            onClick={() => openMoreSettings()}
+            onClick={() => {
+              const tg = (window as any).Telegram?.WebApp;
+              tg?.HapticFeedback?.impactOccurred?.("light");
+              tg?.showAlert?.(
+                ru
+                  ? "Профиль и настройки: Ещё → Настройки"
+                  : "Profile & settings: More → Settings"
+              );
+            }}
             style={{
               display: "flex",
               alignItems: "center",
@@ -571,7 +570,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
             {coachState === "speaking" && "🗣"}
           </span>
 
-          {/* TTS кнопка */}
           {isTTSAvailable() && (
             <button
               onClick={() => {
@@ -602,7 +600,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
           )}
         </div>
 
-        {/* Лимит / статус */}
         <p
           style={{
             fontSize: "10px",
@@ -619,7 +616,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
             : `${COACH_FREE_LIMIT - coachUsage} of ${COACH_FREE_LIMIT}`}
         </p>
 
-        {/* Статус состояния */}
         <p
           style={{
             fontSize: "11px",
@@ -634,7 +630,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
         </p>
       </div>
 
-      {/* ===== ЛИМИТ ===== */}
       {isLimited && (
         <div
           style={{
@@ -683,7 +678,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
         </div>
       )}
 
-      {/* ===== БЫСТРЫЕ ВОПРОСЫ ===== */}
       {messages.length <= 1 && !isLimited && (
         <div
           style={{
@@ -716,7 +710,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
         </div>
       )}
 
-      {/* ===== СООБЩЕНИЯ ===== */}
       <div
         style={{
           flex: 1,
@@ -846,7 +839,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ===== ПОЛЕ ВВОДА ===== */}
       <div
         style={{
           display: "flex",
@@ -857,7 +849,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
           flexShrink: 0,
         }}
       >
-        {/* Микрофон */}
         <button
           onClick={isListening ? stopListening : startListening}
           disabled={isLimited}
@@ -885,7 +876,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
           )}
         </button>
 
-        {/* Текстовое поле */}
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -927,7 +917,6 @@ GOALS_JSON:[{"text":"цель","dueDate":"ISO_или_null"}]
           }}
         />
 
-        {/* Кнопка отправки */}
         <button
           onClick={() => sendMessage()}
           disabled={!input.trim() || loading || isLimited}
