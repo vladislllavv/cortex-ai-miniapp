@@ -2,22 +2,23 @@ import { useState, useEffect } from "react";
 import { ChevronDown, Check } from "lucide-react";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
-import { useAuthStore } from "@/lib/authStore";
 import { useTeamStore } from "@/lib/teamStore";
-import { triggerHaptic } from "@/lib/telegram";
+import { triggerHaptic, getTelegramUser } from "@/lib/telegram";
 
 export default function WorkspaceBar() {
   const language = useI18nStore((s) => s.language);
   const { theme } = useTheme();
   const ru = language === "ru";
-  const { user } = useAuthStore();
+  const tgUser = getTelegramUser();
+  const uid = tgUser?.id || null;
+
   const { workspaces, currentWsId, selectWorkspace, subscribeWorkspaces } =
     useTeamStore();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (user?.uid) subscribeWorkspaces(user.uid);
-  }, [user?.uid]);
+    if (uid) subscribeWorkspaces(uid);
+  }, [uid]);
 
   const current = workspaces.find((w) => w.id === currentWsId);
   const personalLabel = ru ? "Личное" : "Personal";
