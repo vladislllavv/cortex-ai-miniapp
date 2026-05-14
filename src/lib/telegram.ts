@@ -8,6 +8,15 @@ export type TgUser = {
 
 type HapticStyle = "light" | "medium" | "heavy" | "success" | "error" | "warning";
 
+// ═══════════════════════════════════════════════════════════════════
+// НАСТРОЙКИ БОТА — ОБЯЗАТЕЛЬНО ЗАМЕНИ НА СВОИ ЗНАЧЕНИЯ
+// ═══════════════════════════════════════════════════════════════════
+export const BOT_USERNAME = "CortexAITaskBot"; // ← имя твоего бота без @
+export const APP_NAME = "app";                 // ← short_name Mini App из @BotFather
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── Базовые функции (старые, не трогаем) ────────────────────────
+
 export function setupTelegram(): void {
   try {
     const tg = (window as any).Telegram?.WebApp;
@@ -83,5 +92,122 @@ export function closeMiniApp(): void {
   try {
     const tg = (window as any).Telegram?.WebApp;
     tg?.close?.();
+  } catch {}
+}
+
+// ─── НОВЫЕ функции для команд ────────────────────────────────────
+
+/**
+ * Алиасы для совместимости с teamStore/TeamPage
+ */
+export const haptic = triggerHaptic;
+export const tgAlert = (message: string): Promise<void> =>
+  new Promise((resolve) => {
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      if (tg?.showAlert) {
+        tg.showAlert(message, () => resolve());
+      } else {
+        alert(message);
+        resolve();
+      }
+    } catch {
+      resolve();
+    }
+  });
+
+export const tgConfirm = (message: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    try {
+      const tg = (window as any).Telegram?.WebApp;
+      if (tg?.showConfirm) {
+        tg.showConfirm(message, (ok: boolean) => resolve(ok));
+      } else {
+        resolve(window.confirm(message));
+      }
+    } catch {
+      resolve(false);
+    }
+  });
+
+export const getTgUser = getTelegramUser;
+
+/**
+ * Получает start_param при запуске мини-аппа
+ */
+export function getStartParam(): string | null {
+  try {
+    const tg = (window as any).Telegram?.WebApp;
+    return tg?.initDataUnsafe?.start_param || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Парсит start_param: возвращает invite-код если это инвайт
+ */
+export function parseStartParam(): { type: "join"; code: string } | null {
+  const param = getStartParam();
+  if (!param) return null;
+  if (param.startsWith("join_")) {
+    return { type: "join", code: param.substring(5) };
+  }
+  return null;
+}
+
+/**
+ * Строит deep-link для приглашения в команду
+ * Формат: https://t.me/BOT/app?startapp=join_CODE
+ */
+export function buildInviteLink(inviteCode: string): string {
+  return `https://t.me/${BOT_USERNAME}/${APP_NAME}?startapp=join_${inviteCode}`;
+}
+
+/**
+ * Открывает диалог "Поделиться" в Telegram с готовой ссылкой
+ */
+export function shareInviteToTelegram(
+  inviteCode: string,
+  wsName: string,
+  ru: boolean
+): void {
+  const link = buildInviteLink(inviteCode);
+  const text = ru
+    ? `🚀 Присоединяйся к команде «${wsName}» в CortexAI!\n\nКод: ${inviteCode}`
+    : `🚀 Join team "${wsName}" in CortexAI!\n\nCode: ${inviteCode}`;
+
+  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+
+  try {
+    const tg = (window as any).Telegram?.WebApp;
+    if (tg?.openTelegramLink) {
+      tg.openTelegramLink(shareUrl);
+    } else if (navigator.share) {
+      navigator.share({ title: wsName, text, url: link }).catch(() => {});
+    } else {
+      navigator.clipboard.writeText(`${text}\n\n${link}`).catch(() => {});
+    }
+  } catch {}
+}
+
+/**
+ * Копирует ссылку-приглашение в буфер обмена
+ */
+export async function copyInviteLink(inviteCode: string): Promise<void> {
+  const link = buildInviteLink(inviteCode);
+  try {
+    await navigator.clipboard.writeText(link);
+    triggerHaptic("success");
+  } catch {}
+}
+
+/**
+ * Копирует только код в буфер обмена
+ */
+export async function copyInviteCode(code: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(code);
+    triggerHaptic("success");
   } catch {}
 }
