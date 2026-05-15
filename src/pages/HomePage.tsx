@@ -3,6 +3,9 @@ import TaskCard from "@/components/TaskCard";
 import { useTaskStore } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
 import { ChevronDown, ChevronRight, RefreshCw, Clock } from "lucide-react";
+import AssignedTasksBanner from "@/components/AssignedTasksBanner";
+import { useTeamStore } from "@/lib/teamStore";
+import { PERSONAL_WORKSPACE_ID } from "@/lib/workspacePaths";
 
 export default function HomePage() {
   const language = useI18nStore((state) => state.language);
@@ -12,7 +15,12 @@ export default function HomePage() {
   const categories = useTaskStore((state) => state.categories);
   const categoryEvents = useTaskStore((state) => state.categoryEvents);
   const isDataLoaded = useTaskStore((state) => state.isDataLoaded);
+  const activeWorkspaceId = useTaskStore((state) => state.activeWorkspaceId);
+  const { workspaces } = useTeamStore();
   const ru = language === "ru";
+
+  const isTeamWorkspace = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
+  const currentWs = workspaces.find((w) => w.id === activeWorkspaceId);
 
   const todayStr = new Date().toISOString().split("T")[0];
   const tomorrowDate = new Date();
@@ -30,19 +38,16 @@ export default function HomePage() {
 
   const activeTasks = useMemo(() => tasks.filter((t) => t.status !== "done"), [tasks]);
 
-  // Задачи БЕЗ даты (включая AI задачи без даты)
   const noDateTasks = useMemo(() =>
     activeTasks.filter((t) => !t.dueDate && t.repeat !== "daily"),
     [activeTasks]
   );
 
-  // Ежедневные без даты
   const dailyNoDate = useMemo(() =>
     activeTasks.filter((t) => t.repeat === "daily" && !t.dueDate),
     [activeTasks]
   );
 
-  // Задачи С датой
   const tasksWithDate = useMemo(() =>
     activeTasks.filter((t) => t.dueDate),
     [activeTasks]
@@ -98,6 +103,28 @@ export default function HomePage() {
   return (
     <div style={{ paddingTop: "8px" }}>
 
+      {/* Баннер назначенных задач */}
+      <AssignedTasksBanner />
+
+      {/* Индикатор активной команды */}
+      {isTeamWorkspace && currentWs && (
+        <div style={{
+          backgroundColor: "rgba(245,158,11,0.08)",
+          border: "1px solid rgba(245,158,11,0.2)",
+          borderRadius: "10px",
+          padding: "6px 12px",
+          marginBottom: "12px",
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+        }}>
+          <span style={{ fontSize: "14px" }}>👥</span>
+          <p style={{ fontSize: "11px", color: "#fbbf24", margin: 0, fontWeight: 600 }}>
+            {ru ? `Задачи команды: ${currentWs.name}` : `Team tasks: ${currentWs.name}`}
+          </p>
+        </div>
+      )}
+
       {/* Синхронизация */}
       {!isDataLoaded && (
         <div style={{ backgroundColor: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: "10px", padding: "8px 12px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
@@ -109,7 +136,9 @@ export default function HomePage() {
       {/* Брифинг */}
       <div style={{ backgroundColor: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: "18px", padding: "16px", marginBottom: "16px" }}>
         <p style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", margin: "0 0 4px 0", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-          {ru ? "Ежедневный брифинг" : "Daily briefing"}
+          {isTeamWorkspace
+            ? (ru ? "Командный брифинг" : "Team briefing")
+            : (ru ? "Ежедневный брифинг" : "Daily briefing")}
         </p>
         <p style={{ fontSize: "26px", fontWeight: 700, color: "white", margin: "0 0 4px 0", lineHeight: 1.2 }}>
           {activeTasks.length} {ru ? (activeTasks.length === 1 ? "задача" : activeTasks.length < 5 ? "задачи" : "задач") : activeTasks.length === 1 ? "task" : "tasks"}
@@ -144,8 +173,8 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Разделы */}
-      {categories.length > 0 && (
+      {/* Разделы (только для личного workspace) */}
+      {!isTeamWorkspace && categories.length > 0 && (
         <div style={{ marginBottom: "16px" }}>
           <p style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 8px 0" }}>
             {ru ? "Разделы" : "Sections"}
@@ -207,7 +236,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Задачи БЕЗ ДАТЫ — включая AI задачи */}
+      {/* Без даты */}
       {noDateTasks.length > 0 && (
         <div style={{ marginBottom: "20px" }}>
           <button onClick={() => setShowNoDate(!showNoDate)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", padding: 0, width: "100%" }}>
