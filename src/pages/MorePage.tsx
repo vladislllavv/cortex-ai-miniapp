@@ -1,18 +1,23 @@
-import { useState } from "react";
+import { useEffect } from "react";
 import { useI18nStore } from "@/lib/i18n";
-import { useTheme } from "@/contexts/ThemeContext";
 import { ChevronRight, ArrowLeft } from "lucide-react";
 import SettingsPage from "./SettingsPage";
 import WeeklyGoalsPage from "./WeeklyGoalsPage";
 import TeamPage from "./TeamPage";
-
-type SubView = null | "settings" | "goals" | "team";
+import { useNavStore } from "@/lib/navStore";
 
 export default function MorePage() {
   const language = useI18nStore((s) => s.language);
-  const { theme } = useTheme();
   const ru = language === "ru";
-  const [subView, setSubView] = useState<SubView>(null);
+  const subView = useNavStore((s) => s.moreSubView);
+  const setSubView = useNavStore((s) => s.setMoreSubView);
+
+  // Сброс subView при размонтировании (опционально)
+  useEffect(() => {
+    return () => {
+      // оставляем последний subView в памяти — пользователь вернётся туда же
+    };
+  }, []);
 
   const BackBtn = ({ label }: { label: string }) => (
     <button
@@ -63,28 +68,24 @@ export default function MorePage() {
 
   const menuItems = [
     {
-      id: "team",
+      id: "team" as const,
       emoji: "👥",
       label: ru ? "Команда" : "Team",
-      desc: ru
-        ? "Пространства, участники, задачи"
-        : "Workspaces, members, tasks",
+      desc: ru ? "Пространства, участники, задачи" : "Workspaces, members, tasks",
       color: "#f59e0b",
     },
     {
-      id: "goals",
+      id: "goals" as const,
       emoji: "🎯",
       label: ru ? "Цели на неделю" : "Weekly Goals",
       desc: ru ? "Планируй и отслеживай цели" : "Plan and track your goals",
       color: "#22c55e",
     },
     {
-      id: "settings",
+      id: "settings" as const,
       emoji: "⚙️",
       label: ru ? "Настройки" : "Settings",
-      desc: ru
-        ? "Тема, язык, мотивация, аккаунт"
-        : "Theme, language, motivation, account",
+      desc: ru ? "Тема, язык, мотивация, аккаунт" : "Theme, language, motivation",
       color: "#6366f1",
     },
   ];
@@ -106,7 +107,7 @@ export default function MorePage() {
         {menuItems.map((item) => (
           <button
             key={item.id}
-            onClick={() => setSubView(item.id as SubView)}
+            onClick={() => setSubView(item.id)}
             style={{
               display: "flex",
               alignItems: "center",
@@ -136,23 +137,10 @@ export default function MorePage() {
               {item.emoji}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p
-                style={{
-                  fontSize: "15px",
-                  fontWeight: 600,
-                  color: "white",
-                  margin: 0,
-                }}
-              >
+              <p style={{ fontSize: "15px", fontWeight: 600, color: "white", margin: 0 }}>
                 {item.label}
               </p>
-              <p
-                style={{
-                  fontSize: "12px",
-                  color: "rgba(255,255,255,0.4)",
-                  margin: 0,
-                }}
-              >
+              <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
                 {item.desc}
               </p>
             </div>
