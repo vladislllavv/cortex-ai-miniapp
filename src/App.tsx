@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { Home, Calendar, Bot, MoreHorizontal } from "lucide-react";
 import HomePage from "@/pages/HomePage";
 import CalendarPage from "@/pages/CalendarPage";
@@ -9,11 +9,11 @@ import WorkspaceBar from "@/components/WorkspaceBar";
 import TelegramProvider from "@/components/TelegramProvider";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
-
-type Tab = "home" | "plan" | "ai" | "more";
+import { useNavStore } from "@/lib/navStore";
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("home");
+  const tab = useNavStore((s) => s.tab);
+  const setTab = useNavStore((s) => s.setTab);
   const language = useI18nStore((s) => s.language);
   const ru = language === "ru";
   const { theme } = useTheme();
@@ -37,10 +37,10 @@ export default function App() {
   }, []);
 
   const tabs = [
-    { id: "home" as Tab, icon: Home,           label: ru ? "Сегодня" : "Today" },
-    { id: "plan" as Tab, icon: Calendar,       label: ru ? "План"    : "Plan"  },
-    { id: "ai"   as Tab, icon: Bot,            label: "AI"                      },
-    { id: "more" as Tab, icon: MoreHorizontal, label: ru ? "Ещё"     : "More"  },
+    { id: "home" as const, icon: Home,           label: ru ? "Сегодня" : "Today" },
+    { id: "plan" as const, icon: Calendar,       label: ru ? "План"    : "Plan"  },
+    { id: "ai"   as const, icon: Bot,            label: "AI"                      },
+    { id: "more" as const, icon: MoreHorizontal, label: ru ? "Ещё"     : "More"  },
   ];
 
   return (
@@ -53,14 +53,6 @@ export default function App() {
           input, textarea, select { font-size:16px !important; }
           @keyframes bounce { 0%,100%{transform:translateY(0);opacity:.4} 50%{transform:translateY(-4px);opacity:1} }
           @keyframes pulse-dot { 0%,100%{opacity:.4;transform:scale(.8)} 50%{opacity:1;transform:scale(1)} }
-          @keyframes ghost-float {
-            0%,100% { transform: translateY(0px) rotate(-2deg); }
-            50%      { transform: translateY(-8px) rotate(2deg); }
-          }
-          @keyframes ghost-glow {
-            0%,100% { opacity: 0.15; transform: scale(1); }
-            50%      { opacity: 0.35; transform: scale(1.08); }
-          }
           textarea::placeholder, input::placeholder { color:rgba(255,255,255,.3); }
           ::-webkit-scrollbar { width:0; height:0; }
         `}</style>
@@ -77,7 +69,6 @@ export default function App() {
             transition: "background-color 0.3s ease",
           }}
         >
-          {/* Контент */}
           <div
             style={{
               flex: 1,
@@ -100,7 +91,6 @@ export default function App() {
                 flexDirection: tab === "ai" ? "column" : undefined,
               }}
             >
-              {/* WorkspaceBar — только на главной и плане */}
               {(tab === "home" || tab === "plan") && <WorkspaceBar />}
 
               {tab === "home" && <HomePage />}
@@ -110,10 +100,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* AddBtn — только на Сегодня и Плане */}
           {(tab === "home" || tab === "plan") && <AddBtn />}
 
-          {/* Нижняя навигация */}
           <nav
             style={{
               position: "fixed",
