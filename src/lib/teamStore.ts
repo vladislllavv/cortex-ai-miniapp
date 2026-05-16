@@ -83,13 +83,15 @@ interface TeamStore {
     name: string,
     description: string,
     uid: string,
-    userName: string
+    userName: string,
+    photoUrl?: string
   ) => Promise<string>;
   joinByCode: (
     code: string,
     uid: string,
     userName: string,
-    username?: string
+    username?: string,
+    photoUrl?: string
   ) => Promise<string>;
   leaveWorkspace: (wsId: string, uid: string) => Promise<void>;
   deleteWorkspace: (wsId: string) => Promise<void>;
@@ -187,7 +189,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
     });
   },
 
-  createWorkspace: async (name, description, uid, userName) => {
+  createWorkspace: async (name, description, uid, userName, photoUrl) => {
     set({ loading: true });
     try {
       const inviteCode = generateInviteCode();
@@ -204,6 +206,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       await setDoc(doc(db, "workspaces", wsRef.id, "members", uid), {
         uid,
         displayName: userName,
+        photoUrl: photoUrl || "",
         role: "owner" as Role,
         joinedAt: Date.now(),
       });
@@ -213,7 +216,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
     }
   },
 
-  joinByCode: async (code, uid, userName, username) => {
+  joinByCode: async (code, uid, userName, username, photoUrl) => {
     set({ loading: true });
     try {
       const codeUp = code.trim().toUpperCase();
@@ -233,6 +236,7 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
         uid,
         displayName: userName,
         username: username || "",
+        photoUrl: photoUrl || "",
         role: "member" as Role,
         joinedAt: Date.now(),
       });
@@ -264,7 +268,6 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
   },
 
   deleteWorkspace: async (wsId) => {
-    // Получаем данные workspace и владельца перед удалением
     const wsSnap = await getDoc(doc(db, "workspaces", wsId));
     const wsData = wsSnap.exists() ? wsSnap.data() : null;
 
@@ -273,7 +276,6 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       getDocs(collection(db, "workspaces", wsId, "tasks")),
     ]);
 
-    // 🔔 Уведомление всем участникам что команда удалена
     if (wsData) {
       const memberIds = (wsData.memberIds as string[]) || [];
       const otherMembers = memberIds.filter((id) => id !== wsData.ownerId);
@@ -295,7 +297,6 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
   changeRole: async (wsId, memberUid, role, changedByName) => {
     await updateDoc(doc(db, "workspaces", wsId, "members", memberUid), { role });
 
-    // 🔔 Уведомление об изменении роли
     const ws = get().workspaces.find((w) => w.id === wsId);
     if (ws) {
       sendNotification("role_changed", memberUid, {
@@ -314,7 +315,6 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       memberIds: arrayRemove(memberUid),
     });
 
-    // 🔔 Уведомление удалённому участнику
     if (ws) {
       sendNotification("removed_from_workspace", memberUid, {
         workspaceName: ws.name,
@@ -329,7 +329,6 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       createdAt: Date.now(),
     });
 
-    // 🔔 Уведомление назначенному участнику
     if (data.assigneeId && data.assigneeId !== data.createdBy) {
       const ws = get().workspaces.find((w) => w.id === wsId);
       if (ws) {
@@ -353,11 +352,9 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       completedAt: !completed ? Date.now() : null,
     });
 
-    // 🔔 Уведомление автору задачи о выполнении
     if (!completed && task && task.createdBy && completedByName) {
       const ws = get().workspaces.find((w) => w.id === wsId);
-      if (ws && task.createdBy !== get().currentWsId) {
-        // Не уведомляем самого себя
+      if (ws) {
         const tgUserId = (window as any).Telegram?.WebApp?.initDataUnsafe?.user?.id;
         if (String(task.createdBy) !== String(tgUserId)) {
           sendNotification("task_completed", task.createdBy, {
@@ -379,7 +376,6 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
     const oldTask = get().tasks.find((t) => t.id === taskId);
     await updateDoc(doc(db, "workspaces", wsId, "tasks", taskId), patch);
 
-    // 🔔 Если изменился assignee — уведомить нового исполнителя
     if (
       oldTask &&
       patch.assigneeId &&
