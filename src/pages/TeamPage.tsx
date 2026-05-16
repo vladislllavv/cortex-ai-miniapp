@@ -430,7 +430,7 @@ export default function TeamPage() {
                 {canManage && m.uid !== uid && m.role !== "owner" ? (
                   <select
                     value={m.role}
-                    onChange={(e) => changeRole(currentWs.id, m.uid, e.target.value as Role)}
+                    onChange={(e) => changeRole(currentWs.id, m.uid, e.target.value as Role, userName)}
                     style={roleSel}
                   >
                     <option value="member">{ru ? "Участник" : "Member"}</option>
@@ -539,7 +539,7 @@ export default function TeamPage() {
             sortedTasks.map((task) => (
               <div key={task.id} style={taskCard}>
                 <button
-                  onClick={() => { toggleTask(currentWs.id, task.id, task.completed); triggerHaptic("light"); }}
+                  onClick={() => { toggleTask(currentWs.id, task.id, task.completed, userName); triggerHaptic("light"); }}
                   style={{
                     width: "20px",
                     height: "20px",
