@@ -4,12 +4,17 @@ import HomePage from "@/pages/HomePage";
 import CalendarPage from "@/pages/CalendarPage";
 import AiHubPage from "@/pages/AiHubPage";
 import MorePage from "@/pages/MorePage";
+import GoogleCalendarCallback from "@/pages/GoogleCalendarCallback";
 import AddBtn from "@/components/AddBtn";
 import WorkspaceBar from "@/components/WorkspaceBar";
 import TelegramProvider from "@/components/TelegramProvider";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useNavStore } from "@/lib/navStore";
+
+// Определяем — это Google OAuth callback или основное приложение
+const isGoogleCallback = window.location.pathname === "/auth/google/callback" ||
+  window.location.search.includes("code=") && window.location.search.includes("state=");
 
 export default function App() {
   const tab = useNavStore((s) => s.tab);
@@ -35,6 +40,11 @@ export default function App() {
     window.addEventListener("resize", onResize, { passive: true });
     return () => { window.removeEventListener("resize", onResize); clearTimeout(t); };
   }, []);
+
+  // Google Calendar OAuth callback
+  if (isGoogleCallback) {
+    return <GoogleCalendarCallback />;
+  }
 
   const tabs = [
     { id: "home" as const, icon: Home,           label: ru ? "Сегодня" : "Today" },

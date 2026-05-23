@@ -14,7 +14,7 @@ export const paths = {
   subscription: (userId: string) =>
     `subscriptions/${userId}`,
 
-  // Workspaces
+  // Workspaces пользователя (личные + командные)
   userWorkspaces: (userId: string) =>
     `users/${userId}/workspaces`,
 
@@ -27,6 +27,20 @@ export const paths = {
 
   task: (userId: string, workspaceId: string, taskId: string) =>
     `users/${userId}/workspaces/${workspaceId}/tasks/${taskId}`,
+
+  // Групповые чаты / командные пространства Telegram
+  groupWorkspaces: () => `groupWorkspaces`,
+  groupWorkspace: (chatId: string) => `groupWorkspaces/${chatId}`,
+  groupTasks: (chatId: string) => `groupWorkspaces/${chatId}/tasks`,
+  groupTask: (chatId: string, taskId: string) =>
+    `groupWorkspaces/${chatId}/tasks/${taskId}`,
+  groupMembers: (chatId: string) => `groupWorkspaces/${chatId}/members`,
+  groupMember: (chatId: string, userId: string) =>
+    `groupWorkspaces/${chatId}/members/${userId}`,
+
+  // Google Calendar интеграция
+  googleCalendar: (userId: string) =>
+    `users/${userId}/integrations/googleCalendar`,
 
   // Бот-коллекция для напоминаний
   botTasks: () => `tasks`,
