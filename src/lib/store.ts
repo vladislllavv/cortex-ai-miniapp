@@ -48,6 +48,10 @@ export type Task = {
   workspaceId?: string;
   assigneeUserId?: string;
   createdBy?: string;
+  /** Метки/теги для фильтрации */
+  tags?: string[];
+  /** Порядок сортировки (для drag & drop) */
+  sortOrder?: number;
 };
 
 export type Birthday = {
@@ -285,6 +289,8 @@ function normalizeTask(task: any): Task {
     workspaceId: task.workspaceId || PERSONAL_WORKSPACE_ID,
     assigneeUserId: task.assigneeUserId,
     createdBy: task.createdBy,
+    tags: Array.isArray(task.tags) ? task.tags : [],
+    sortOrder: task.sortOrder ?? 0,
   };
 }
 

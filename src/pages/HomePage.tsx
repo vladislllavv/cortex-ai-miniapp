@@ -1,69 +1,47 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import TaskCard from "@/components/TaskCard";
+import SearchBar from "@/components/SearchBar";
 import { useTaskStore } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
-import { ChevronRight, ChevronDown, Clock, Repeat2, Flame, TrendingUp } from "lucide-react";
+import {
+  ChevronRight, ChevronDown, Clock, Repeat2, Flame, TrendingUp, Star,
+} from "lucide-react";
 import AssignedTasksBanner from "@/components/AssignedTasksBanner";
 import { useTeamStore } from "@/lib/teamStore";
 import { PERSONAL_WORKSPACE_ID } from "@/lib/workspacePaths";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getAccentGradient, getSecondaryColor } from "@/lib/theme";
 
-// ─── Мини-гистограмма выполнения ─────────────────────────────────
+// ─── Week chart ────────────────────────────────────────────────────
 function WeekChart({ tasks }: { tasks: any[] }) {
   const { theme } = useTheme();
   const days = useMemo(() => {
-    const result = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() - (6 - i));
       const ds = d.toISOString().split("T")[0];
-      const done   = tasks.filter((t) => t.status === "done" && t.completedAt?.startsWith(ds)).length;
-      const created = tasks.filter((t) => t.createdAt?.startsWith(ds)).length;
-      result.push({ label: d.toLocaleDateString("ru-RU", { weekday: "narrow" }), done, created, isToday: i === 0 });
-    }
-    return result;
+      return {
+        label: d.toLocaleDateString("ru-RU", { weekday: "narrow" }),
+        done: tasks.filter((t) => t.status === "done" && t.completedAt?.startsWith(ds)).length,
+        total: tasks.filter((t) => t.createdAt?.startsWith(ds)).length,
+        isToday: i === 6,
+      };
+    });
   }, [tasks]);
-
-  const maxVal = Math.max(...days.map((d) => d.created), 1);
+  const maxVal = Math.max(...days.map((d) => Math.max(d.total, d.done)), 1);
   const gradient = getAccentGradient(theme);
-  const sec = getSecondaryColor(theme);
-
   return (
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 48 }}>
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 44 }}>
       {days.map((day, i) => {
-        const heightPct = day.created / maxVal;
-        const donePct   = day.created > 0 ? day.done / day.created : 0;
+        const totalH = Math.max((day.total / maxVal) * 32, day.total > 0 ? 4 : 0);
+        const doneH  = Math.max((day.done / maxVal) * 32, day.done > 0 ? 4 : 0);
         return (
           <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-            <div style={{
-              width: "100%", height: 36, borderRadius: 4,
-              background: "rgba(255,255,255,0.06)",
-              position: "relative", overflow: "hidden",
-            }}>
-              {/* total bar */}
-              {day.created > 0 && (
-                <div style={{
-                  position: "absolute", bottom: 0, left: 0, right: 0,
-                  height: `${Math.max(heightPct * 100, 15)}%`,
-                  background: `${theme.primary}30`,
-                }} />
-              )}
-              {/* done bar */}
-              {day.done > 0 && (
-                <div style={{
-                  position: "absolute", bottom: 0, left: 0, right: 0,
-                  height: `${Math.max(donePct * heightPct * 100, 8)}%`,
-                  background: day.isToday ? gradient : `${theme.primary}80`,
-                  borderRadius: "0 0 4px 4px",
-                }} />
-              )}
-              {/* today indicator */}
-              {day.isToday && (
-                <div style={{ position: "absolute", top: 2, right: 2, width: 4, height: 4, borderRadius: "50%", background: theme.primary }} />
-              )}
+            <div style={{ width: "100%", height: 32, borderRadius: 4, background: "rgba(255,255,255,0.07)", position: "relative", overflow: "hidden" }}>
+              {totalH > 0 && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: totalH, background: `${theme.primary}35` }} />}
+              {doneH  > 0 && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: doneH, background: day.isToday ? gradient : `${theme.primary}80`, borderRadius: "0 0 4px 4px" }} />}
+              {day.isToday && <div style={{ position: "absolute", top: 2, right: 2, width: 4, height: 4, borderRadius: "50%", background: theme.primary }} />}
             </div>
-            <span style={{ fontSize: 9, color: day.isToday ? theme.primary : "rgba(255,255,255,0.3)", fontWeight: day.isToday ? 700 : 400 }}>
+            <span style={{ fontSize: 9, color: day.isToday ? theme.primary : "rgba(255,255,255,0.25)", fontWeight: day.isToday ? 700 : 400 }}>
               {day.label}
             </span>
           </div>
@@ -73,40 +51,40 @@ function WeekChart({ tasks }: { tasks: any[] }) {
   );
 }
 
-// ─── Кольцевой прогресс ────────────────────────────────────────────
-function RingProgress({ value, total, color, size = 56 }: { value: number; total: number; color: string; size?: number }) {
-  const pct = total > 0 ? value / total : 0;
-  const r = (size - 8) / 2;
+// ─── Ring progress ─────────────────────────────────────────────────
+function Ring({ value, total, color, size = 60 }: { value: number; total: number; color: string; size?: number }) {
+  const pct  = total > 0 ? value / total : 0;
+  const r    = (size - 8) / 2;
   const circ = 2 * Math.PI * r;
-  const dash = circ * pct;
   return (
     <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={6} />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={6} />
       <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={6}
-        strokeDasharray={`${dash} ${circ - dash}`} strokeLinecap="round"
-        style={{ transition: "stroke-dasharray 0.5s ease" }}
-      />
+        strokeDasharray={`${circ * pct} ${circ * (1 - pct)}`} strokeLinecap="round"
+        style={{ transition: "stroke-dasharray 0.6s ease" }} />
     </svg>
   );
 }
 
 export default function HomePage() {
   const language = useI18nStore((s) => s.language);
-  const tasks    = useTaskStore((s) => s.tasks);
+  const tasks     = useTaskStore((s) => s.tasks);
   const birthdays = useTaskStore((s) => s.birthdays);
   const vacations = useTaskStore((s) => s.vacations);
-  const categories = useTaskStore((s) => s.categories);
+  const categories     = useTaskStore((s) => s.categories);
   const categoryEvents = useTaskStore((s) => s.categoryEvents);
-  const isDataLoaded = useTaskStore((s) => s.isDataLoaded);
+  const isDataLoaded   = useTaskStore((s) => s.isDataLoaded);
   const activeWorkspaceId = useTaskStore((s) => s.activeWorkspaceId);
   const { workspaces } = useTeamStore();
   const { theme } = useTheme();
   const ru = language === "ru";
+  const gradient = getAccentGradient(theme);
+  const sec = getSecondaryColor(theme);
 
-  const isTeam = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
+  const isTeam    = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
   const currentWs = workspaces.find((w) => w.id === activeWorkspaceId);
 
-  const now     = new Date();
+  const now      = new Date();
   const todayStr = now.toISOString().split("T")[0];
   const tmrDate  = new Date(now); tmrDate.setDate(now.getDate() + 1);
   const tmrStr   = tmrDate.toISOString().split("T")[0];
@@ -126,11 +104,12 @@ export default function HomePage() {
   const later   = useMemo(() => withDate.filter((t) => new Date(t.dueDate!) >= now && !t.dueDate!.startsWith(todayStr) && !t.dueDate!.startsWith(tmrStr)), [withDate, todayStr, tmrStr]);
   const noDate  = useMemo(() => active.filter((t) => !t.dueDate && t.repeat !== "daily"), [active]);
   const daily   = useMemo(() => active.filter((t) => t.repeat === "daily" && !t.dueDate), [active]);
+  const highPri = useMemo(() => active.filter((t) => t.priority === "high"), [active]);
 
-  const completionRate = tasks.length > 0 ? Math.round((done.length / tasks.length) * 100) : 0;
+  const rate = tasks.length > 0 ? Math.round((done.length / tasks.length) * 100) : 0;
 
   const [showDone,    setShowDone]    = useState(false);
-  const [showNoDate,  setShowNoDate]  = useState(true);
+  const [showNoDate,  setShowNoDate]  = useState(false);
   const [showOverdue, setShowOverdue] = useState(true);
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
@@ -144,111 +123,100 @@ export default function HomePage() {
     });
   }, [activeSection, birthdays, vacations, categoryEvents, categories, theme]);
 
-  const hour = now.getHours();
+  const h = now.getHours();
   const greeting = ru
-    ? (hour < 6 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер")
-    : (hour < 6 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening");
-
-  const gradient = getAccentGradient(theme);
-  const sec = getSecondaryColor(theme);
+    ? (h < 6 ? "Доброй ночи 🌙" : h < 12 ? "Доброе утро ☀️" : h < 18 ? "Добрый день 👋" : "Добрый вечер 🌆")
+    : (h < 6 ? "Good night 🌙"  : h < 12 ? "Good morning ☀️": h < 18 ? "Good afternoon 👋" : "Good evening 🌆");
 
   return (
     <div style={{ paddingTop: 4 }}>
 
       {/* ── Header ── */}
-      <div style={{ marginBottom: 20 }}>
+      <div style={{ marginBottom: 16 }}>
         <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: "0 0 2px 0", textTransform: "capitalize" }}>
           {now.toLocaleDateString(ru ? "ru-RU" : "en-US", { weekday: "long", day: "numeric", month: "long" })}
         </p>
-        <h1 style={{ fontSize: 26, fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-0.5px" }}>
-          {greeting} 👋
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-0.5px" }}>
+          {greeting}
         </h1>
       </div>
+
+      {/* ── Search ── */}
+      <SearchBar />
 
       <AssignedTasksBanner />
 
       {/* Team badge */}
       {isTeam && currentWs && (
-        <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 12, padding: "8px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 16 }}>👥</span>
+        <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 12, padding: "8px 14px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
+          <span>👥</span>
           <span style={{ fontSize: 13, color: "#fbbf24", fontWeight: 600 }}>{currentWs.name}</span>
         </div>
       )}
 
       {/* Syncing */}
       {!isDataLoaded && (
-        <div style={{ background: `${theme.primary}12`, border: `1px solid ${theme.primary}20`, borderRadius: 12, padding: "8px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ background: `${theme.primary}10`, border: `1px solid ${theme.primary}20`, borderRadius: 12, padding: "8px 14px", marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
           <div style={{ width: 7, height: 7, borderRadius: "50%", background: theme.primary, animation: "pulse-ring 1s ease-in-out infinite" }} />
           <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{ru ? "Синхронизация..." : "Syncing..."}</span>
         </div>
       )}
 
-      {/* ── Hero card с графиком ── */}
-      <div style={{
-        background: gradient,
-        borderRadius: 20, padding: "18px 18px 14px", marginBottom: 16,
-        position: "relative", overflow: "hidden",
-      }}>
-        {/* bg decoration */}
-        <div style={{ position: "absolute", top: -20, right: -20, width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
-        <div style={{ position: "absolute", bottom: -30, right: 40, width: 60, height: 60, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
-
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+      {/* ── Hero card ── */}
+      {tasks.length > 0 && (
+        <div style={{ background: gradient, borderRadius: 20, padding: "16px 18px 14px", marginBottom: 14, position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: -24, right: -24, width: 96, height: 96, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+            <div>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", margin: "0 0 4px 0", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.8px" }}>
+                {ru ? "Прогресс" : "Progress"}
+              </p>
+              <p style={{ fontSize: 30, fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-1px" }}>
+                {done.length}
+                <span style={{ fontSize: 16, fontWeight: 400, color: "rgba(255,255,255,0.6)", marginLeft: 4 }}>/ {tasks.length}</span>
+              </p>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", margin: "2px 0 0 0" }}>
+                {overdue.length > 0
+                  ? `⚠️ ${overdue.length} ${ru ? "просрочено" : "overdue"}`
+                  : todayT.length > 0
+                  ? `📌 ${todayT.length} ${ru ? "на сегодня" : "today"}`
+                  : ru ? "Всё идёт по плану ✅" : "All on track ✅"}
+              </p>
+            </div>
+            <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Ring value={done.length} total={tasks.length} color="rgba(255,255,255,0.9)" size={60} />
+              <span style={{ position: "absolute", fontSize: 13, fontWeight: 800, color: "#fff" }}>{rate}%</span>
+            </div>
+          </div>
           <div>
-            <p style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.7)", margin: "0 0 4px 0", textTransform: "uppercase", letterSpacing: "0.8px" }}>
-              {ru ? "Прогресс дня" : "Daily progress"}
+            <p style={{ fontSize: 9, color: "rgba(255,255,255,0.6)", margin: "0 0 5px 0", display: "flex", alignItems: "center", gap: 4, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              <TrendingUp size={9} /> {ru ? "7 дней" : "7 days"}
             </p>
-            <p style={{ fontSize: 32, fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-1px" }}>
-              {todayT.length}
-              <span style={{ fontSize: 16, fontWeight: 500, color: "rgba(255,255,255,0.7)", marginLeft: 6 }}>
-                {ru ? "на сегодня" : "today"}
-              </span>
-            </p>
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", margin: "4px 0 0 0" }}>
-              {overdue.length > 0
-                ? (ru ? `⚠️ ${overdue.length} просрочено` : `⚠️ ${overdue.length} overdue`)
-                : done.length > 0
-                ? (ru ? `✅ ${done.length} выполнено` : `✅ ${done.length} done`)
-                : (ru ? "Начинай день!" : "Start your day!")}
-            </p>
-          </div>
-          <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <RingProgress value={done.length} total={tasks.length} color="rgba(255,255,255,0.9)" size={64} />
-            <span style={{ position: "absolute", fontSize: 14, fontWeight: 800, color: "#fff" }}>
-              {completionRate}%
-            </span>
+            <WeekChart tasks={tasks} />
           </div>
         </div>
-
-        {/* Mini chart */}
-        <div>
-          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", margin: "0 0 6px 0", display: "flex", alignItems: "center", gap: 4 }}>
-            <TrendingUp size={10} />{ru ? "7 дней" : "7 days"}
-          </p>
-          <WeekChart tasks={tasks} />
-        </div>
-      </div>
+      )}
 
       {/* ── Stats row ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 18 }}>
         {[
-          { label: ru ? "Всего" : "Total",   value: active.length,  color: theme.primary,   emoji: "📋" },
-          { label: ru ? "Сегодня" : "Today", value: todayT.length,  color: sec,             emoji: "📌" },
-          { label: ru ? "Готово" : "Done",   value: done.length,    color: "#22c55e",       emoji: "✅" },
-          { label: ru ? "Просроч" : "Late",  value: overdue.length, color: overdue.length > 0 ? "#ef4444" : "rgba(255,255,255,0.3)", emoji: overdue.length > 0 ? "🔥" : "⏱" },
+          { label: ru ? "Всего" : "Total",   v: active.length,  c: theme.primary, e: "📋" },
+          { label: ru ? "Сегодня" : "Today", v: todayT.length,  c: sec,           e: "📌" },
+          { label: ru ? "Готово" : "Done",   v: done.length,    c: "#22c55e",     e: "✅" },
+          { label: ru ? "🔴" : "🔴",         v: highPri.length, c: highPri.length > 0 ? "#ef4444" : "rgba(255,255,255,0.3)", e: "🔴" },
         ].map((s) => (
-          <div key={s.label} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: "12px 8px", textAlign: "center" }}>
-            <p style={{ fontSize: 16, margin: "0 0 2px 0" }}>{s.emoji}</p>
-            <p style={{ fontSize: 20, fontWeight: 800, color: s.color, margin: "0 0 2px 0", letterSpacing: "-0.5px" }}>{s.value}</p>
-            <p style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", margin: 0, fontWeight: 600, textTransform: "uppercase" }}>{s.label}</p>
+          <div key={s.label} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: "10px 8px", textAlign: "center" }}>
+            <p style={{ fontSize: 14, margin: "0 0 2px 0" }}>{s.e}</p>
+            <p style={{ fontSize: 20, fontWeight: 800, color: s.c, margin: "0 0 2px 0", letterSpacing: "-0.5px" }}>{s.v}</p>
+            <p style={{ fontSize: 9, color: "rgba(255,255,255,0.3)", margin: 0, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.3px" }}>{s.label}</p>
           </div>
         ))}
       </div>
 
       {/* ── Birthdays ── */}
       {todayBirths.length > 0 && (
-        <div style={{ background: `linear-gradient(135deg, ${theme.primary}18, ${sec}18)`, border: `1px solid ${theme.primary}30`, borderRadius: 16, padding: "12px 16px", marginBottom: 12, display: "flex", gap: 12, alignItems: "center" }}>
-          <span style={{ fontSize: 26 }}>🎂</span>
+        <div style={{ background: `${theme.primary}15`, border: `1px solid ${theme.primary}30`, borderRadius: 16, padding: "12px 16px", marginBottom: 10, display: "flex", gap: 12, alignItems: "center" }}>
+          <span style={{ fontSize: 24 }}>🎂</span>
           <div>
             <p style={{ fontSize: 13, fontWeight: 700, color: theme.primary, margin: "0 0 2px 0" }}>{ru ? "День рождения сегодня!" : "Birthday today!"}</p>
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", margin: 0 }}>{todayBirths.map((b) => b.name).join(", ")}</p>
@@ -256,27 +224,24 @@ export default function HomePage() {
         </div>
       )}
       {tmrBirths.length > 0 && (
-        <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "10px 16px", marginBottom: 12, display: "flex", gap: 10, alignItems: "center" }}>
-          <span style={{ fontSize: 20 }}>🎂</span>
-          <div>
-            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.6)", margin: "0 0 2px 0" }}>{ru ? "День рождения завтра" : "Birthday tomorrow"}</p>
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>{tmrBirths.map((b) => b.name).join(", ")}</p>
-          </div>
+        <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "10px 16px", marginBottom: 10, display: "flex", gap: 10, alignItems: "center" }}>
+          <span style={{ fontSize: 18 }}>🎂</span>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", margin: 0 }}>{ru ? "Завтра: " : "Tomorrow: "}{tmrBirths.map((b) => b.name).join(", ")}</p>
         </div>
       )}
 
-      {/* ── Sections ── */}
+      {/* ── Category sections ── */}
       {!isTeam && categories.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.8px", margin: "0 0 10px 0" }}>{ru ? "Разделы" : "Sections"}</p>
-          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+        <div style={{ marginBottom: 18 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.8px", margin: "0 0 8px 0" }}>{ru ? "Разделы" : "Sections"}</p>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4 }}>
             {categories.map((cat) => {
-              const isActive = activeSection === cat.id;
+              const isA = activeSection === cat.id;
               const cnt = cat.id === "birthdays" ? birthdays.length : cat.id === "vacations" ? vacations.length : categoryEvents.filter((e) => e.categoryId === cat.id).length;
               return (
-                <button key={cat.id} onClick={() => setActiveSection(isActive ? null : cat.id)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 20, border: `1px solid ${isActive ? cat.color : "rgba(255,255,255,0.08)"}`, background: isActive ? `${cat.color}18` : "rgba(255,255,255,0.04)", color: isActive ? cat.color : "rgba(255,255,255,0.55)", fontSize: 12, fontWeight: isActive ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, transition: "all 0.18s", fontFamily: "inherit" }}>
+                <button key={cat.id} onClick={() => setActiveSection(isA ? null : cat.id)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 20, border: `1px solid ${isA ? cat.color : "rgba(255,255,255,0.08)"}`, background: isA ? `${cat.color}16` : "rgba(255,255,255,0.04)", color: isA ? cat.color : "rgba(255,255,255,0.5)", fontSize: 12, fontWeight: isA ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, fontFamily: "inherit" }}>
                   <span>{cat.icon}</span><span>{cat.name}</span>
-                  {cnt > 0 && <span style={{ fontSize: 10, background: isActive ? `${cat.color}30` : "rgba(255,255,255,0.08)", borderRadius: 8, padding: "1px 5px" }}>{cnt}</span>}
+                  {cnt > 0 && <span style={{ fontSize: 10, background: "rgba(255,255,255,0.1)", borderRadius: 6, padding: "1px 5px" }}>{cnt}</span>}
                 </button>
               );
             })}
@@ -287,12 +252,12 @@ export default function HomePage() {
                 ? <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", margin: 0, textAlign: "center" }}>{ru ? "Нет данных" : "No data"}</p>
                 : sectionData.map((item) => (
                   <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                    <span style={{ fontSize: 16, flexShrink: 0 }}>{item.icon}</span>
+                    <span style={{ fontSize: 15, flexShrink: 0 }}>{item.icon}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 13, fontWeight: 500, color: "#fff", margin: 0 }}>{item.title}</p>
                       <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: 0 }}>{item.sub}</p>
                     </div>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.color, flexShrink: 0 }} />
+                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: item.color, flexShrink: 0 }} />
                   </div>
                 ))
               }
@@ -301,59 +266,73 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* ── High priority banner ── */}
+      {highPri.length > 0 && (
+        <div style={{ background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.18)", borderRadius: 14, padding: "10px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
+          <Flame size={16} color="#ef4444" />
+          <p style={{ fontSize: 13, color: "#fca5a5", margin: 0, fontWeight: 500 }}>
+            {highPri.length} {ru ? "задач высокого приоритета" : "high-priority tasks"}
+          </p>
+        </div>
+      )}
+
       {/* ── Overdue ── */}
       {overdue.length > 0 && (
-        <Group icon={<Flame size={13} color="#ef4444" />} title={<span style={{ color: "#ef4444" }}>{ru ? "Просрочено" : "Overdue"}</span>} count={overdue.length} countColor="#ef4444" open={showOverdue} onToggle={() => setShowOverdue(!showOverdue)}>
+        <Group icon={<Flame size={12} color="#ef4444" />} label={ru ? "Просрочено" : "Overdue"} labelColor="#ef4444" count={overdue.length} open={showOverdue} onToggle={() => setShowOverdue(!showOverdue)}>
           {overdue.map((t) => <TaskCard key={t.id} task={t} />)}
         </Group>
       )}
 
-      {/* ── Daily ── */}
+      {/* Daily */}
       {daily.length > 0 && (
-        <Group icon={<Repeat2 size={13} color="#f59e0b" />} title={<span style={{ color: "#f59e0b" }}>{ru ? "Ежедневные" : "Daily"}</span>} count={daily.length} countColor="#f59e0b" open={true} onToggle={() => {}}>
+        <Group icon={<Repeat2 size={12} color="#f59e0b" />} label={ru ? "Ежедневные" : "Daily"} labelColor="#f59e0b" count={daily.length} open={true} onToggle={() => {}}>
           {daily.map((t) => <TaskCard key={t.id} task={t} />)}
         </Group>
       )}
 
-      {/* ── Today ── */}
-      <SB title={`📌 ${ru ? "Сегодня" : "Today"}`} tasks={todayT} empty={ru ? "Нет задач на сегодня" : "No tasks today"} primary={theme.primary} />
-      <SB title={`📋 ${ru ? "Завтра" : "Tomorrow"}`} tasks={tmrT} empty={ru ? "Нет задач на завтра" : "No tasks tomorrow"} primary={theme.primary} />
-      {later.length > 0 && <SB title={`📅 ${ru ? "Позже" : "Later"}`} tasks={later} empty="" primary={theme.primary} />}
+      {/* Today */}
+      <SB title={ru ? "Сегодня" : "Today"} emoji="📌" tasks={todayT} empty={ru ? "На сегодня задач нет" : "No tasks today"} />
+      <SB title={ru ? "Завтра" : "Tomorrow"} emoji="📋" tasks={tmrT} empty={ru ? "На завтра задач нет" : "No tasks tomorrow"} />
+      {later.length > 0 && <SB title={ru ? "Позже" : "Later"} emoji="📅" tasks={later} empty="" />}
 
-      {/* ── No date ── */}
+      {/* No date */}
       {noDate.length > 0 && (
-        <Group icon={<Clock size={13} color="rgba(255,255,255,0.4)" />} title={<span style={{ color: "rgba(255,255,255,0.5)" }}>{ru ? "Без срока" : "No deadline"}</span>} count={noDate.length} countColor="rgba(255,255,255,0.3)" open={showNoDate} onToggle={() => setShowNoDate(!showNoDate)}>
+        <Group icon={<Clock size={12} color="rgba(255,255,255,0.35)" />} label={ru ? "Без срока" : "No deadline"} labelColor="rgba(255,255,255,0.45)" count={noDate.length} open={showNoDate} onToggle={() => setShowNoDate(!showNoDate)}>
           {noDate.map((t) => <TaskCard key={t.id} task={t} />)}
         </Group>
       )}
 
-      {/* ── Done ── */}
+      {/* Done */}
       {done.length > 0 && (
-        <Group icon={null} title={<span style={{ color: "rgba(255,255,255,0.35)" }}>✅ {ru ? "Выполненные" : "Completed"}</span>} count={done.length} countColor="rgba(255,255,255,0.25)" open={showDone} onToggle={() => setShowDone(!showDone)}>
+        <Group icon={null} label={`✅ ${ru ? "Выполненные" : "Completed"}`} labelColor="rgba(255,255,255,0.35)" count={done.length} open={showDone} onToggle={() => setShowDone(!showDone)}>
           {done.map((t) => <TaskCard key={t.id} task={t} />)}
         </Group>
       )}
 
+      {/* Empty state */}
       {active.length === 0 && done.length === 0 && isDataLoaded && (
-        <div style={{ textAlign: "center", padding: "50px 20px" }}>
-          <div style={{ fontSize: 56, marginBottom: 16 }}>✨</div>
-          <p style={{ fontSize: 20, fontWeight: 800, color: "#fff", margin: "0 0 8px 0" }}>{ru ? "Нет задач!" : "No tasks!"}</p>
-          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", margin: 0 }}>{ru ? "Нажми + чтобы добавить первую задачу" : "Tap + to add your first task"}</p>
+        <div style={{ textAlign: "center", padding: "44px 20px" }}>
+          <p style={{ fontSize: 52, margin: "0 0 12px 0" }}>✨</p>
+          <p style={{ fontSize: 18, fontWeight: 800, color: "#fff", margin: "0 0 6px 0" }}>{ru ? "Пусто!" : "Empty!"}</p>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", margin: 0 }}>
+            {ru ? "Нажми + чтобы добавить первую задачу" : "Tap + to add your first task"}
+          </p>
         </div>
       )}
     </div>
   );
 }
 
-function SB({ title, tasks, empty, primary }: { title: string; tasks: any[]; empty: string; primary: string }) {
+function SB({ title, emoji, tasks, empty }: { title: string; emoji: string; tasks: any[]; empty: string }) {
   return (
-    <div style={{ marginBottom: 22 }}>
+    <div style={{ marginBottom: 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 13 }}>{emoji}</span>
         <p style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", margin: 0, textTransform: "uppercase", letterSpacing: "0.6px" }}>{title}</p>
-        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.06)", borderRadius: 8, padding: "1px 6px" }}>{tasks.length}</span>
+        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: "1px 6px" }}>{tasks.length}</span>
       </div>
       {tasks.length === 0
-        ? <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 14, padding: "14px 16px", border: "1px dashed rgba(255,255,255,0.07)" }}>
+        ? <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 12, padding: "12px 16px", border: "1px dashed rgba(255,255,255,0.07)" }}>
             <p style={{ fontSize: 13, color: "rgba(255,255,255,0.2)", margin: 0, textAlign: "center" }}>{empty}</p>
           </div>
         : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{tasks.map((t) => <TaskCard key={t.id} task={t} />)}</div>
@@ -362,14 +341,17 @@ function SB({ title, tasks, empty, primary }: { title: string; tasks: any[]; emp
   );
 }
 
-function Group({ icon, title, count, countColor, open, onToggle, children }: { icon: React.ReactNode; title: React.ReactNode; count: number; countColor: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
+function Group({ icon, label, labelColor, count, open, onToggle, children }: {
+  icon: React.ReactNode; label: string; labelColor: string;
+  count: number; open: boolean; onToggle: () => void; children: React.ReactNode;
+}) {
   return (
-    <div style={{ marginBottom: 18 }}>
+    <div style={{ marginBottom: 16 }}>
       <button onClick={onToggle} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 7, marginBottom: open ? 10 : 0, padding: 0, width: "100%", fontFamily: "inherit" }}>
-        {open ? <ChevronDown size={13} color="rgba(255,255,255,0.3)" /> : <ChevronRight size={13} color="rgba(255,255,255,0.3)" />}
+        {open ? <ChevronDown size={12} color="rgba(255,255,255,0.3)" /> : <ChevronRight size={12} color="rgba(255,255,255,0.3)" />}
         {icon}
-        <span style={{ fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 5, textTransform: "uppercase", letterSpacing: "0.5px" }}>{title}</span>
-        <span style={{ fontSize: 10, color: countColor, background: "rgba(255,255,255,0.06)", borderRadius: 8, padding: "1px 7px", marginLeft: "auto" }}>{count}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: labelColor, textTransform: "uppercase", letterSpacing: "0.5px" }}>{label}</span>
+        <span style={{ fontSize: 10, color: labelColor, background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: "1px 7px", marginLeft: "auto" }}>{count}</span>
       </button>
       {open && <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{children}</div>}
     </div>

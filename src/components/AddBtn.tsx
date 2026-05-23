@@ -58,7 +58,9 @@ export default function AddBtn() {
   const [customDays, setCustomDays] = useState<string[]>([]);
   const [remindBefore, setRemindBefore] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [shoppingItems, setShoppingItems] = useState<string[]>([""]);
+  const [shoppingItems, setShoppingItems] = useState<string[]>(["""]);
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const savingRef = useRef(false);
 
   const resetForm = () => {
@@ -67,6 +69,7 @@ export default function AddBtn() {
     setCustomDays([]); setRemindBefore(0);
     setStep(0); setTaskType("task");
     setSaving(false); setShoppingItems([""]);
+    setTags([]); setTagInput("");
     savingRef.current = false;
   };
 
@@ -171,6 +174,7 @@ export default function AddBtn() {
         repeat: repeatValue as any,
         type: taskType,
         items: taskType === "shopping" ? validItems : [],
+        tags,
       });
 
       triggerHaptic("success");
