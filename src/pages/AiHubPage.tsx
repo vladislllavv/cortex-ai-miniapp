@@ -36,8 +36,8 @@ export default function AiHubPage() {
       >
         {(
           [
-            { id: "assistant" as AiTab, label: ru ? "Ассистент" : "Assistant", emoji: "⚡" },
-            { id: "coach"     as AiTab, label: ru ? "Коуч"      : "Coach",     emoji: "👻" },
+            { id: "assistant" as AiTab, label: ru ? "АИ Агент" : "AI Agent", emoji: "⚡" },
+            { id: "coach"     as AiTab, label: ru ? "АИ Коуч"  : "AI Coach",  emoji: "💪" },
           ]
         ).map(({ id, label, emoji }) => (
           <button
@@ -45,7 +45,7 @@ export default function AiHubPage() {
             onClick={() => setAiTab(id)}
             style={{
               flex: 1,
-              height: "34px",
+              height: "36px",
               borderRadius: "9px",
               border: "none",
               backgroundColor: aiTab === id ? theme.primary : "transparent",
