@@ -19,23 +19,50 @@ export default function AiHubPage() {
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
-
-      {/* Segment control */}
-      <div style={{ display: "flex", gap: 6, background: "rgba(255,255,255,0.05)", borderRadius: 14, padding: 4, marginBottom: 12, flexShrink: 0 }}>
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      flex: 1,
+      minHeight: 0,
+      overflow: "hidden",
+      /* Важно: используем height 100% чтобы занять всё пространство */
+      height: "100%",
+    }}>
+      {/* ── Segment tabs ── */}
+      <div style={{
+        display: "flex",
+        gap: 6,
+        background: "rgba(255,255,255,0.05)",
+        borderRadius: 14,
+        padding: 4,
+        marginBottom: 12,
+        flexShrink: 0,
+      }}>
         {tabs.map(({ id, label, Icon }) => {
           const active = aiTab === id;
           return (
-            <button key={id} onClick={() => setAiTab(id)} style={{
-              flex: 1, height: 38, borderRadius: 10, border: "none",
-              background: active ? theme.primary : "transparent",
-              color: active ? "#fff" : "rgba(255,255,255,0.4)",
-              fontSize: 13, fontWeight: active ? 700 : 400,
-              cursor: "pointer", display: "flex", alignItems: "center",
-              justifyContent: "center", gap: 6,
-              transition: "all 0.2s",
-              boxShadow: active ? `0 4px 12px ${theme.primary}40` : "none",
-            }}>
+            <button
+              key={id}
+              onClick={() => setAiTab(id)}
+              style={{
+                flex: 1,
+                height: 38,
+                borderRadius: 10,
+                border: "none",
+                background: active ? theme.primary : "transparent",
+                color: active ? "#fff" : "rgba(255,255,255,0.4)",
+                fontSize: 13,
+                fontWeight: active ? 700 : 400,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                transition: "all 0.2s",
+                boxShadow: active ? `0 4px 12px ${theme.primary}40` : "none",
+                fontFamily: "inherit",
+              }}
+            >
               <Icon size={15} strokeWidth={active ? 2.5 : 2} />
               {label}
             </button>
@@ -43,8 +70,14 @@ export default function AiHubPage() {
         })}
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      {/* ── Content area — flex:1 to fill remaining space ── */}
+      <div style={{
+        flex: 1,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}>
         {aiTab === "assistant" && <AiProcessPage embedded />}
         {aiTab === "coach"     && <CoachPage embedded />}
       </div>
