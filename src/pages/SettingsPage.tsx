@@ -6,7 +6,7 @@ import {
   checkSubscription,
   CustomCategory,
 } from "@/lib/store";
-import { THEMES } from "@/lib/theme";
+import { THEMES, getAccentGradient } from "@/lib/theme";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useState, useEffect, useRef } from "react";
@@ -947,146 +947,89 @@ export default function SettingsPage() {
       {/* ==================== ТЕМА ==================== */}
       <SectionTitle>
         <Palette size={13} style={{ marginRight: "5px" }} />
-        {ru ? "Тема приложения" : "App Theme"}
+        {ru ? "Тема оформления" : "App Theme"}
         {themeSaving && (
-          <span
-            style={{
-              fontSize: "10px",
-              color: "rgba(255,255,255,0.4)",
-              marginLeft: "8px",
-            }}
-          >
+          <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.4)", marginLeft: "8px" }}>
             {ru ? "Сохраняю..." : "Saving..."}
           </span>
         )}
       </SectionTitle>
-      <div
-        style={{
-          backgroundColor: "rgba(255,255,255,0.05)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          borderRadius: "16px",
-          padding: "14px",
-          marginBottom: "8px",
-        }}
-      >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
-            gap: "10px",
-          }}
-        >
-          {THEMES.map((t) => {
-            const isActive = theme.id === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => handleThemeChange(t.id)}
-                style={{
-                  borderRadius: "14px",
-                  border: isActive
-                    ? `2px solid ${t.primary}`
-                    : "2px solid rgba(255,255,255,0.1)",
-                  padding: "10px 6px",
-                  cursor: "pointer",
-                  backgroundColor: isActive
-                    ? `${t.primary}20`
-                    : t.bg,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: "8px",
-                  transition: "all 0.2s ease",
-                  position: "relative",
-                }}
-              >
-                <div
-                  style={{
-                    width: "100%",
-                    height: "40px",
-                    borderRadius: "8px",
-                    backgroundColor: t.bg,
-                    border: `1px solid ${t.primary}30`,
-                    overflow: "hidden",
-                    padding: "6px",
-                    boxSizing: "border-box" as const,
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "8px",
-                      borderRadius: "4px",
-                      backgroundColor: t.bgCard,
-                      marginBottom: "4px",
-                    }}
-                  />
-                  <div
-                    style={{
-                      height: "6px",
-                      borderRadius: "4px",
-                      backgroundColor: t.primary,
-                      width: "60%",
-                    }}
-                  />
+      {/* Монотонные */}
+      <p style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.8px", margin: "0 0 8px 0" }}>
+        {ru ? "🎨 Монотонные" : "🎨 Monochrome"}
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+        {THEMES.filter(t => !t.gradient).map((t) => {
+          const isActive = theme.id === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => handleThemeChange(t.id)}
+              style={{
+                borderRadius: 16, padding: "10px 8px",
+                border: isActive ? `2px solid ${t.primary}` : "2px solid rgba(255,255,255,0.07)",
+                background: isActive ? `${t.primary}15` : t.bg,
+                cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+                transition: "all 0.2s", position: "relative", fontFamily: "inherit",
+              }}
+            >
+              {/* Preview */}
+              <div style={{ width: "100%", height: 36, borderRadius: 10, background: t.bg, border: `1px solid ${t.primary}25`, overflow: "hidden", padding: "5px 6px", boxSizing: "border-box" as const }}>
+                <div style={{ height: 7, borderRadius: 3, background: `${t.primary}50`, marginBottom: 3 }} />
+                <div style={{ height: 5, borderRadius: 3, background: t.primary, width: "55%" }} />
+              </div>
+              {/* Color dot */}
+              <div style={{ width: 18, height: 18, borderRadius: "50%", background: t.primary, border: isActive ? "2px solid white" : "2px solid transparent", boxShadow: isActive ? `0 0 8px ${t.primary}` : "none" }} />
+              <p style={{ fontSize: 9, color: isActive ? t.primary : "rgba(255,255,255,0.45)", margin: 0, fontWeight: isActive ? 700 : 400, textAlign: "center" as const, lineHeight: 1.2 }}>
+                {ru ? t.name : t.nameEn}
+              </p>
+              {isActive && (
+                <div style={{ position: "absolute", top: 5, right: 5, width: 16, height: 16, borderRadius: "50%", background: t.primary, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Check size={9} color="white" />
                 </div>
-                <div
-                  style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    backgroundColor: t.primary,
-                    border: isActive
-                      ? "2px solid white"
-                      : "2px solid transparent",
-                  }}
-                />
-                <p
-                  style={{
-                    fontSize: "10px",
-                    color: isActive
-                      ? t.primary
-                      : "rgba(255,255,255,0.5)",
-                    margin: 0,
-                    fontWeight: isActive ? 700 : 400,
-                    textAlign: "center" as const,
-                  }}
-                >
-                  {ru ? t.name : t.nameEn}
-                </p>
-                {isActive && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: "5px",
-                      right: "5px",
-                      width: "18px",
-                      height: "18px",
-                      borderRadius: "50%",
-                      backgroundColor: t.primary,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Check size={10} color="white" />
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+              )}
+            </button>
+          );
+        })}
       </div>
-      <p
-        style={{
-          fontSize: "11px",
-          color: "rgba(255,255,255,0.3)",
-          margin: "0 0 20px 0",
-          textAlign: "center" as const,
-        }}
-      >
-        {ru
-          ? "Тема синхронизируется между устройствами"
-          : "Theme syncs across devices"}
+
+      {/* Разноцветные */}
+      <p style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.8px", margin: "0 0 8px 0" }}>
+        {ru ? "🌈 Разноцветные" : "🌈 Multicolor"}
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+        {THEMES.filter(t => t.gradient).map((t) => {
+          const isActive = theme.id === t.id;
+          const grad = `linear-gradient(135deg, ${t.gradient!.join(", ")})`;
+          return (
+            <button
+              key={t.id}
+              onClick={() => handleThemeChange(t.id)}
+              style={{
+                borderRadius: 16, padding: "12px 14px",
+                border: isActive ? `2px solid ${t.gradient![0]}` : "2px solid rgba(255,255,255,0.07)",
+                background: isActive ? `${t.gradient![0]}15` : t.bg,
+                cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+                transition: "all 0.2s", position: "relative", fontFamily: "inherit", textAlign: "left" as const,
+              }}
+            >
+              {/* Gradient preview */}
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: grad, flexShrink: 0, boxShadow: isActive ? `0 4px 12px ${t.gradient![0]}40` : "none" }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: "#fff", margin: "0 0 2px 0" }}>{ru ? t.name : t.nameEn}</p>
+                <p style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", margin: 0 }}>{ru ? t.desc : t.descEn}</p>
+              </div>
+              {isActive && (
+                <div style={{ width: 20, height: 20, borderRadius: "50%", background: grad, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <Check size={10} color="white" />
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.25)", margin: "0 0 20px 0", textAlign: "center" as const }}>
+        {ru ? "Тема синхронизируется между устройствами" : "Theme syncs across devices"}
       </p>
 
       {/* ==================== TELEGRAM КАНАЛ ==================== */}

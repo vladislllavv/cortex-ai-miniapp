@@ -3,6 +3,7 @@ import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useTeamStore, Role } from "@/lib/teamStore";
 import { getTelegramUserId } from "@/lib/store";
+import { getSafeUserId } from "@/lib/teamStore";
 import {
   copyInviteCode,
   copyInviteLink,
@@ -107,7 +108,8 @@ export default function TeamPage() {
   const { theme } = useTheme();
   const ru = language === "ru";
 
-  const uid = getTelegramUserId();
+  const _rawUid = getTelegramUserId();
+  const uid = getSafeUserId(_rawUid);
   const tgUser = getTelegramUser();
   const userName =
     tgUser?.first_name || tgUser?.username || (uid !== "unknown" ? uid.slice(0, 6) : "User");
@@ -152,11 +154,11 @@ export default function TeamPage() {
   const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
 
   useEffect(() => {
-    if (uid && uid !== "unknown") subscribeWorkspaces(uid);
+    if (uid) subscribeWorkspaces(uid);
   }, [uid]);
 
   useEffect(() => {
-    if (!uid || uid === "unknown") return;
+    if (!uid) return;
     const param = parseStartParam();
     if (param?.type === "join") {
       setJoinCode(param.code);
@@ -220,7 +222,7 @@ export default function TeamPage() {
   // ─── Действия ───
 
   const handleCreate = async () => {
-    if (!newName.trim() || !uid || uid === "unknown") return;
+    if (!newName.trim() || !uid) return;
     setError("");
     try {
       const wsId = await createWorkspace(newName, newDesc, uid, userName, userPhotoUrl);
@@ -236,7 +238,7 @@ export default function TeamPage() {
   };
 
   const handleJoin = async () => {
-    if (!joinCode.trim() || !uid || uid === "unknown") return;
+    if (!joinCode.trim() || !uid) return;
     setError("");
     try {
       const wsId = await joinByCode(joinCode, uid, userName, tgUser?.username, userPhotoUrl);
@@ -255,7 +257,7 @@ export default function TeamPage() {
   };
 
   const handleLeave = async () => {
-    if (!currentWs || !uid || uid === "unknown") return;
+    if (!currentWs || !uid) return;
     const ok = await tgConfirm(
       ru ? `Покинуть «${currentWs.name}»?` : `Leave "${currentWs.name}"?`
     );
@@ -301,7 +303,7 @@ export default function TeamPage() {
   };
 
   const handleCreateTask = async () => {
-    if (!taskTitle.trim() || !currentWs || !uid || uid === "unknown") return;
+    if (!taskTitle.trim() || !currentWs || !uid) return;
     const assignee = members.find((m) => m.uid === taskAssignee);
 
     let dueDate: string | null = null;
@@ -334,7 +336,7 @@ export default function TeamPage() {
     triggerHaptic("success");
   };
 
-  if (!uid || uid === "unknown") {
+  if (!uid) {
     return (
       <div style={{ paddingTop: "40px", textAlign: "center" }}>
         <AlertCircle size={40} color="rgba(255,255,255,0.3)" />
