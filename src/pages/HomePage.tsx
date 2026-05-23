@@ -2,355 +2,246 @@ import { useState, useMemo } from "react";
 import TaskCard from "@/components/TaskCard";
 import { useTaskStore } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
-import { ChevronDown, ChevronRight, RefreshCw, Clock } from "lucide-react";
+import { ChevronRight, ChevronDown, Clock, Repeat2, Flame } from "lucide-react";
 import AssignedTasksBanner from "@/components/AssignedTasksBanner";
 import { useTeamStore } from "@/lib/teamStore";
 import { PERSONAL_WORKSPACE_ID } from "@/lib/workspacePaths";
+import { useTheme } from "@/contexts/ThemeContext";
 
 export default function HomePage() {
-  const language = useI18nStore((state) => state.language);
-  const tasks = useTaskStore((state) => state.tasks);
-  const birthdays = useTaskStore((state) => state.birthdays);
-  const vacations = useTaskStore((state) => state.vacations);
-  const categories = useTaskStore((state) => state.categories);
-  const categoryEvents = useTaskStore((state) => state.categoryEvents);
-  const isDataLoaded = useTaskStore((state) => state.isDataLoaded);
-  const activeWorkspaceId = useTaskStore((state) => state.activeWorkspaceId);
+  const language = useI18nStore((s) => s.language);
+  const tasks = useTaskStore((s) => s.tasks);
+  const birthdays = useTaskStore((s) => s.birthdays);
+  const vacations = useTaskStore((s) => s.vacations);
+  const categories = useTaskStore((s) => s.categories);
+  const categoryEvents = useTaskStore((s) => s.categoryEvents);
+  const isDataLoaded = useTaskStore((s) => s.isDataLoaded);
+  const activeWorkspaceId = useTaskStore((s) => s.activeWorkspaceId);
   const { workspaces } = useTeamStore();
+  const { theme } = useTheme();
   const ru = language === "ru";
 
-  const isTeamWorkspace = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
+  const isTeam = activeWorkspaceId !== PERSONAL_WORKSPACE_ID;
   const currentWs = workspaces.find((w) => w.id === activeWorkspaceId);
 
-  const todayStr = new Date().toISOString().split("T")[0];
-  const tomorrowDate = new Date();
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrowStr = tomorrowDate.toISOString().split("T")[0];
-
   const now = new Date();
-  const todayMonth = String(now.getMonth() + 1).padStart(2, "0");
-  const todayDay = String(now.getDate()).padStart(2, "0");
-  const tomorrowMonth = String(tomorrowDate.getMonth() + 1).padStart(2, "0");
-  const tomorrowDay = String(tomorrowDate.getDate()).padStart(2, "0");
+  const todayStr    = now.toISOString().split("T")[0];
+  const tmrDate     = new Date(now); tmrDate.setDate(now.getDate() + 1);
+  const tmrStr      = tmrDate.toISOString().split("T")[0];
+  const todayMD     = `${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+  const tmrMD       = `${String(tmrDate.getMonth()+1).padStart(2,"0")}-${String(tmrDate.getDate()).padStart(2,"0")}`;
 
-  const todayBirthdays = birthdays.filter((b) => b.date === `${todayMonth}-${todayDay}`);
-  const tomorrowBirthdays = birthdays.filter((b) => b.date === `${tomorrowMonth}-${tomorrowDay}`);
+  const todayBirths = birthdays.filter((b) => b.date === todayMD);
+  const tmrBirths   = birthdays.filter((b) => b.date === tmrMD);
 
-  const activeTasks = useMemo(() => tasks.filter((t) => t.status !== "done"), [tasks]);
+  const active  = useMemo(() => tasks.filter((t) => t.status !== "done"), [tasks]);
+  const done    = useMemo(() => tasks.filter((t) => t.status === "done"),  [tasks]);
+  const withDate = useMemo(() => active.filter((t) => t.dueDate), [active]);
 
-  const noDateTasks = useMemo(() =>
-    activeTasks.filter((t) => !t.dueDate && t.repeat !== "daily"),
-    [activeTasks]
-  );
+  const todayT    = useMemo(() => withDate.filter((t) => t.dueDate?.startsWith(todayStr)), [withDate, todayStr]);
+  const tmrT      = useMemo(() => withDate.filter((t) => t.dueDate?.startsWith(tmrStr)),   [withDate, tmrStr]);
+  const overdue   = useMemo(() => withDate.filter((t) => new Date(t.dueDate!) < now && !t.dueDate!.startsWith(todayStr)), [withDate, todayStr]);
+  const later     = useMemo(() => withDate.filter((t) => new Date(t.dueDate!) >= now && !t.dueDate!.startsWith(todayStr) && !t.dueDate!.startsWith(tmrStr)), [withDate, todayStr, tmrStr]);
+  const noDate    = useMemo(() => active.filter((t) => !t.dueDate && t.repeat !== "daily"), [active]);
+  const daily     = useMemo(() => active.filter((t) => t.repeat === "daily" && !t.dueDate), [active]);
 
-  const dailyNoDate = useMemo(() =>
-    activeTasks.filter((t) => t.repeat === "daily" && !t.dueDate),
-    [activeTasks]
-  );
-
-  const tasksWithDate = useMemo(() =>
-    activeTasks.filter((t) => t.dueDate),
-    [activeTasks]
-  );
-
-  const todayTasks = useMemo(() =>
-    tasksWithDate.filter((t) => t.dueDate?.startsWith(todayStr)),
-    [tasksWithDate, todayStr]
-  );
-
-  const tomorrowTasks = useMemo(() =>
-    tasksWithDate.filter((t) => t.dueDate?.startsWith(tomorrowStr)),
-    [tasksWithDate, tomorrowStr]
-  );
-
-  const overdueTasks = useMemo(() =>
-    tasksWithDate.filter((t) => {
-      if (!t.dueDate) return false;
-      const taskDate = new Date(t.dueDate);
-      return taskDate < now && !t.dueDate.startsWith(todayStr);
-    }),
-    [tasksWithDate, todayStr]
-  );
-
-  const otherTasks = useMemo(() =>
-    tasksWithDate.filter((t) => {
-      if (!t.dueDate) return false;
-      const taskDate = new Date(t.dueDate);
-      return taskDate >= now && !t.dueDate.startsWith(todayStr) && !t.dueDate.startsWith(tomorrowStr);
-    }),
-    [tasksWithDate, todayStr, tomorrowStr]
-  );
-
-  const doneTasks = useMemo(() => tasks.filter((t) => t.status === "done"), [tasks]);
-
-  const [showDone, setShowDone] = useState(false);
-  const [showDailyNoDate, setShowDailyNoDate] = useState(true);
-  const [showNoDate, setShowNoDate] = useState(true);
+  const [showDone,    setShowDone]    = useState(false);
+  const [showNoDate,  setShowNoDate]  = useState(true);
   const [showOverdue, setShowOverdue] = useState(true);
-  const [activeSection, setActiveSection] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<string|null>(null);
 
-  const activeSectionData = useMemo(() => {
+  const sectionData = useMemo(() => {
     if (!activeSection) return null;
-    if (activeSection === "birthdays") return birthdays.map((b) => ({ id: b.id, title: b.name, subtitle: b.date, color: b.color, icon: "🎂", type: "birthday" as const }));
-    if (activeSection === "vacations") return vacations.map((v) => ({ id: v.id, title: v.title, subtitle: `${v.startDate} — ${v.endDate}`, color: v.color, icon: "🌴", type: "vacation" as const }));
-    const events = categoryEvents.filter((e) => e.categoryId === activeSection);
-    return events.map((e) => {
+    if (activeSection === "birthdays") return birthdays.map((b) => ({ id: b.id, title: b.name, sub: b.date, color: b.color, icon: "🎂" }));
+    if (activeSection === "vacations") return vacations.map((v) => ({ id: v.id, title: v.title, sub: `${v.startDate} — ${v.endDate}`, color: v.color, icon: "🌴" }));
+    return categoryEvents.filter((e) => e.categoryId === activeSection).map((e) => {
       const cat = categories.find((c) => c.id === e.categoryId);
-      return { id: e.id, title: e.title, subtitle: e.endDate ? `${e.date} — ${e.endDate}` : e.date, color: e.color || cat?.color || "#3b82f6", icon: cat?.icon || "📁", type: "event" as const };
+      return { id: e.id, title: e.title, sub: e.endDate ? `${e.date} — ${e.endDate}` : e.date, color: e.color || cat?.color || theme.primary, icon: cat?.icon || "📁" };
     });
-  }, [activeSection, birthdays, vacations, categoryEvents, categories]);
+  }, [activeSection, birthdays, vacations, categoryEvents, categories, theme]);
+
+  const greeting = () => {
+    const h = now.getHours();
+    if (ru) return h < 12 ? "Доброе утро" : h < 18 ? "Добрый день" : "Добрый вечер";
+    return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+  };
+
+  const dateStr = now.toLocaleDateString(ru ? "ru-RU" : "en-US", { weekday: "long", day: "numeric", month: "long" });
 
   return (
-    <div style={{ paddingTop: "8px" }}>
+    <div style={{ paddingTop: 4 }}>
 
-      {/* Баннер назначенных задач */}
-      <AssignedTasksBanner />
-
-      {/* Индикатор активной команды */}
-      {isTeamWorkspace && currentWs && (
-        <div style={{
-          backgroundColor: "rgba(245,158,11,0.08)",
-          border: "1px solid rgba(245,158,11,0.2)",
-          borderRadius: "10px",
-          padding: "6px 12px",
-          marginBottom: "12px",
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-        }}>
-          <span style={{ fontSize: "14px" }}>👥</span>
-          <p style={{ fontSize: "11px", color: "#fbbf24", margin: 0, fontWeight: 600 }}>
-            {ru ? `Задачи команды: ${currentWs.name}` : `Team tasks: ${currentWs.name}`}
-          </p>
-        </div>
-      )}
-
-      {/* Синхронизация */}
-      {!isDataLoaded && (
-        <div style={{ backgroundColor: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: "10px", padding: "8px 12px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-          <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#3b82f6", animation: "pulse-dot 1s ease-in-out infinite" }} />
-          <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)" }}>{ru ? "Синхронизация..." : "Syncing..."}</span>
-        </div>
-      )}
-
-      {/* Брифинг */}
-      <div style={{ backgroundColor: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: "18px", padding: "16px", marginBottom: "16px" }}>
-        <p style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.4)", margin: "0 0 4px 0", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-          {isTeamWorkspace
-            ? (ru ? "Командный брифинг" : "Team briefing")
-            : (ru ? "Ежедневный брифинг" : "Daily briefing")}
-        </p>
-        <p style={{ fontSize: "26px", fontWeight: 700, color: "white", margin: "0 0 4px 0", lineHeight: 1.2 }}>
-          {activeTasks.length} {ru ? (activeTasks.length === 1 ? "задача" : activeTasks.length < 5 ? "задачи" : "задач") : activeTasks.length === 1 ? "task" : "tasks"}
-        </p>
-        <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
-          {activeTasks.length === 0
-            ? (ru ? "Все задачи выполнены! 🎉" : "All tasks done! 🎉")
-            : todayTasks.length > 0
-            ? ru ? `${todayTasks.length} на сегодня` : `${todayTasks.length} for today`
-            : ru ? "На сегодня задач нет" : "No tasks for today"}
-        </p>
+      {/* ── Header ── */}
+      <div style={{ marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: "0 0 2px 0", textTransform: "capitalize" }}>{dateStr}</p>
+        <h1 style={{ fontSize: 26, fontWeight: 700, color: "#fff", margin: 0, letterSpacing: "-0.5px" }}>{greeting()} 👋</h1>
       </div>
 
-      {/* Дни рождения */}
-      {todayBirthdays.length > 0 && (
-        <div style={{ backgroundColor: "rgba(59,130,246,0.12)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "14px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{ fontSize: "20px" }}>🎂</span>
+      <AssignedTasksBanner />
+
+      {/* ── Team badge ── */}
+      {isTeam && currentWs && (
+        <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 12, padding: "8px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>👥</span>
+          <span style={{ fontSize: 13, color: "#fbbf24", fontWeight: 600 }}>{currentWs.name}</span>
+        </div>
+      )}
+
+      {/* ── Loading ── */}
+      {!isDataLoaded && (
+        <div style={{ background: `${theme.primary}12`, border: `1px solid ${theme.primary}20`, borderRadius: 12, padding: "8px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 7, height: 7, borderRadius: "50%", background: theme.primary, animation: "pulse-ring 1s ease-in-out infinite" }} />
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{ru ? "Синхронизация..." : "Syncing..."}</span>
+        </div>
+      )}
+
+      {/* ── Stats cards ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 20 }}>
+        {[
+          { label: ru ? "Сегодня" : "Today",     value: todayT.length,  color: theme.primary, emoji: "📌" },
+          { label: ru ? "Активно" : "Active",     value: active.length,  color: "#f59e0b",     emoji: "⚡" },
+          { label: ru ? "Готово" : "Done",        value: done.length,    color: "#22c55e",     emoji: "✅" },
+        ].map((s) => (
+          <div key={s.label} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "14px 12px" }}>
+            <p style={{ fontSize: 22, margin: "0 0 2px 0" }}>{s.emoji}</p>
+            <p style={{ fontSize: 22, fontWeight: 700, color: s.color, margin: "0 0 2px 0", letterSpacing: "-0.5px" }}>{s.value}</p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", margin: 0, fontWeight: 500 }}>{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Birthdays ── */}
+      {todayBirths.length > 0 && (
+        <div style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.15), rgba(139,92,246,0.15))", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 14, padding: "12px 16px", marginBottom: 12, display: "flex", gap: 12, alignItems: "center" }}>
+          <span style={{ fontSize: 28 }}>🎂</span>
           <div>
-            <p style={{ fontSize: "13px", fontWeight: 600, color: "#93c5fd", margin: 0 }}>{ru ? "День рождения сегодня!" : "Birthday today!"}</p>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)", margin: 0 }}>{todayBirthdays.map((b) => b.name).join(", ")}</p>
+            <p style={{ fontSize: 13, fontWeight: 700, color: "#a78bfa", margin: "0 0 2px 0" }}>{ru ? "День рождения сегодня!" : "Birthday today!"}</p>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", margin: 0 }}>{todayBirths.map((b) => b.name).join(", ")}</p>
+          </div>
+        </div>
+      )}
+      {tmrBirths.length > 0 && (
+        <div style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.15)", borderRadius: 14, padding: "10px 16px", marginBottom: 12, display: "flex", gap: 10, alignItems: "center" }}>
+          <span style={{ fontSize: 22 }}>🎂</span>
+          <div>
+            <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(167,139,250,0.8)", margin: "0 0 2px 0" }}>{ru ? "День рождения завтра" : "Birthday tomorrow"}</p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: 0 }}>{tmrBirths.map((b) => b.name).join(", ")}</p>
           </div>
         </div>
       )}
 
-      {tomorrowBirthdays.length > 0 && (
-        <div style={{ backgroundColor: "rgba(59,130,246,0.07)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: "14px", padding: "12px 14px", marginBottom: "10px", display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{ fontSize: "20px" }}>🎂</span>
-          <div>
-            <p style={{ fontSize: "13px", fontWeight: 600, color: "rgba(147,197,253,0.8)", margin: 0 }}>{ru ? "День рождения завтра" : "Birthday tomorrow"}</p>
-            <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{tomorrowBirthdays.map((b) => b.name).join(", ")}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Разделы (только для личного workspace) */}
-      {!isTeamWorkspace && categories.length > 0 && (
-        <div style={{ marginBottom: "16px" }}>
-          <p style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "0.5px", margin: "0 0 8px 0" }}>
-            {ru ? "Разделы" : "Sections"}
-          </p>
-          <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "4px" }}>
+      {/* ── Sections ── */}
+      {!isTeam && categories.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <p style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.8px", margin: "0 0 10px 0" }}>{ru ? "Разделы" : "Sections"}</p>
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
             {categories.map((cat) => {
-              const isActive = activeSection === cat.id;
-              let count = 0;
-              if (cat.id === "birthdays") count = birthdays.length;
-              else if (cat.id === "vacations") count = vacations.length;
-              else count = categoryEvents.filter((e) => e.categoryId === cat.id).length;
+              const active2 = activeSection === cat.id;
+              const cnt = cat.id === "birthdays" ? birthdays.length : cat.id === "vacations" ? vacations.length : categoryEvents.filter((e) => e.categoryId === cat.id).length;
               return (
-                <button key={cat.id} onClick={() => setActiveSection(isActive ? null : cat.id)} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "20px", border: isActive ? `1px solid ${cat.color}` : "1px solid rgba(255,255,255,0.1)", backgroundColor: isActive ? `${cat.color}20` : "rgba(255,255,255,0.05)", color: isActive ? cat.color : "rgba(255,255,255,0.6)", fontSize: "13px", fontWeight: isActive ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
-                  <span>{cat.icon}</span>
-                  <span>{cat.name}</span>
-                  {count > 0 && <span style={{ fontSize: "11px", backgroundColor: isActive ? `${cat.color}40` : "rgba(255,255,255,0.1)", borderRadius: "10px", padding: "1px 6px" }}>{count}</span>}
+                <button key={cat.id} onClick={() => setActiveSection(active2 ? null : cat.id)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 20, border: `1px solid ${active2 ? cat.color : "rgba(255,255,255,0.08)"}`, background: active2 ? `${cat.color}18` : "rgba(255,255,255,0.04)", color: active2 ? cat.color : "rgba(255,255,255,0.55)", fontSize: 12, fontWeight: active2 ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0, transition: "all 0.18s" }}>
+                  <span>{cat.icon}</span><span>{cat.name}</span>
+                  {cnt > 0 && <span style={{ fontSize: 10, background: active2 ? `${cat.color}30` : "rgba(255,255,255,0.08)", borderRadius: 8, padding: "1px 5px" }}>{cnt}</span>}
                 </button>
               );
             })}
           </div>
-          {activeSection && activeSectionData !== null && (
-            <div style={{ marginTop: "10px", backgroundColor: "rgba(255,255,255,0.04)", borderRadius: "14px", padding: "12px", border: "1px solid rgba(255,255,255,0.07)" }}>
-              {activeSectionData.length === 0 ? (
-                <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.3)", margin: 0, textAlign: "center" }}>{ru ? "Нет данных. Добавь в Календаре." : "No data. Add in Calendar."}</p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  {activeSectionData.map((item) => (
-                    <div key={item.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", backgroundColor: "rgba(255,255,255,0.05)", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
-                      <span style={{ fontSize: "16px" }}>{item.icon}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontSize: "14px", fontWeight: 500, color: "white", margin: 0, wordBreak: "break-word" }}>{item.title}</p>
-                        <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)", margin: 0 }}>{item.subtitle}</p>
-                      </div>
-                      <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: item.color, flexShrink: 0 }} />
+          {activeSection && sectionData && (
+            <div style={{ marginTop: 10, background: "rgba(255,255,255,0.03)", borderRadius: 14, padding: "12px", border: "1px solid rgba(255,255,255,0.06)" }}>
+              {sectionData.length === 0
+                ? <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", margin: 0, textAlign: "center" }}>{ru ? "Нет данных" : "No data"}</p>
+                : sectionData.map((item) => (
+                  <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>{item.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 500, color: "#fff", margin: 0 }}>{item.title}</p>
+                      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", margin: 0 }}>{item.sub}</p>
                     </div>
-                  ))}
-                </div>
-              )}
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: item.color, flexShrink: 0 }} />
+                  </div>
+                ))
+              }
             </div>
           )}
         </div>
       )}
 
-      {/* Просроченные */}
-      {overdueTasks.length > 0 && (
-        <div style={{ marginBottom: "20px" }}>
-          <button onClick={() => setShowOverdue(!showOverdue)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", padding: 0, width: "100%" }}>
-            {showOverdue ? <ChevronDown size={14} color="#ef4444" /> : <ChevronRight size={14} color="#ef4444" />}
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "#ef4444" }}>
-              ⚠️ {ru ? "Просроченные" : "Overdue"}{" "}
-              <span style={{ color: "rgba(239,68,68,0.5)", fontWeight: 400 }}>({overdueTasks.length})</span>
-            </span>
-          </button>
-          {showOverdue && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              {overdueTasks.map((task) => <TaskCard key={task.id} task={task} />)}
-            </div>
-          )}
+      {/* ── Overdue ── */}
+      {overdue.length > 0 && (
+        <Group title={<><Flame size={14} color="#ef4444" /> <span style={{ color: "#ef4444" }}>{ru ? "Просрочено" : "Overdue"}</span></>} count={overdue.length} countColor="#ef4444" open={showOverdue} onToggle={() => setShowOverdue(!showOverdue)}>
+          {overdue.map((t) => <TaskCard key={t.id} task={t} />)}
+        </Group>
+      )}
+
+      {/* ── Daily no date ── */}
+      {daily.length > 0 && (
+        <Group title={<><Repeat2 size={14} color="#f59e0b" /> <span style={{ color: "#f59e0b" }}>{ru ? "Ежедневные" : "Daily"}</span></>} count={daily.length} countColor="#f59e0b" open={true} onToggle={() => {}}>
+          {daily.map((t) => <TaskCard key={t.id} task={t} />)}
+        </Group>
+      )}
+
+      {/* ── Today ── */}
+      <SectionBlock title={`📌 ${ru ? "Сегодня" : "Today"}`} tasks={todayT} empty={ru ? "Нет задач на сегодня" : "No tasks today"} />
+
+      {/* ── Tomorrow ── */}
+      <SectionBlock title={`📋 ${ru ? "Завтра" : "Tomorrow"}`} tasks={tmrT} empty={ru ? "Нет задач на завтра" : "No tasks tomorrow"} />
+
+      {/* ── Later ── */}
+      {later.length > 0 && <SectionBlock title={`📅 ${ru ? "Позже" : "Later"}`} tasks={later} empty="" />}
+
+      {/* ── No date ── */}
+      {noDate.length > 0 && (
+        <Group title={<><Clock size={14} color="rgba(255,255,255,0.4)" /> <span style={{ color: "rgba(255,255,255,0.5)" }}>{ru ? "Без срока" : "No deadline"}</span></>} count={noDate.length} countColor="rgba(255,255,255,0.3)" open={showNoDate} onToggle={() => setShowNoDate(!showNoDate)}>
+          {noDate.map((t) => <TaskCard key={t.id} task={t} />)}
+        </Group>
+      )}
+
+      {/* ── Done ── */}
+      {done.length > 0 && (
+        <Group title={<span style={{ color: "rgba(255,255,255,0.4)" }}>✅ {ru ? "Выполненные" : "Completed"}</span>} count={done.length} countColor="rgba(255,255,255,0.25)" open={showDone} onToggle={() => setShowDone(!showDone)}>
+          {done.map((t) => <TaskCard key={t.id} task={t} />)}
+        </Group>
+      )}
+
+      {active.length === 0 && done.length === 0 && isDataLoaded && (
+        <div style={{ textAlign: "center", padding: "40px 20px" }}>
+          <p style={{ fontSize: 48, margin: "0 0 12px 0" }}>✨</p>
+          <p style={{ fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 8px 0" }}>{ru ? "Нет задач" : "No tasks"}</p>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", margin: 0 }}>{ru ? "Нажми + чтобы добавить" : "Tap + to add a task"}</p>
         </div>
       )}
-
-      {/* Без даты */}
-      {noDateTasks.length > 0 && (
-        <div style={{ marginBottom: "20px" }}>
-          <button onClick={() => setShowNoDate(!showNoDate)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", padding: 0, width: "100%" }}>
-            {showNoDate ? <ChevronDown size={14} color="rgba(255,255,255,0.5)" /> : <ChevronRight size={14} color="rgba(255,255,255,0.5)" />}
-            <Clock size={13} color="rgba(255,255,255,0.5)" />
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "rgba(255,255,255,0.6)" }}>
-              {ru ? "Без срока" : "No deadline"}{" "}
-              <span style={{ color: "rgba(255,255,255,0.25)", fontWeight: 400 }}>({noDateTasks.length})</span>
-            </span>
-          </button>
-          {showNoDate && (
-            <>
-              <div style={{ backgroundColor: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px" }}>
-                <p style={{ fontSize: "11px", color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                  {ru
-                    ? "Задачи без даты и времени. Добавь дату через кнопку редактирования."
-                    : "Tasks without date/time. Add a date via the edit button."}
-                </p>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {noDateTasks.map((task) => <TaskCard key={task.id} task={task} />)}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Ежедневные без даты */}
-      {dailyNoDate.length > 0 && (
-        <div style={{ marginBottom: "20px" }}>
-          <button onClick={() => setShowDailyNoDate(!showDailyNoDate)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", padding: 0, width: "100%" }}>
-            {showDailyNoDate ? <ChevronDown size={14} color="rgba(255,165,0,0.7)" /> : <ChevronRight size={14} color="rgba(255,165,0,0.7)" />}
-            <RefreshCw size={13} color="rgba(255,165,0,0.7)" />
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "rgba(255,165,0,0.8)" }}>
-              {ru ? "Ежедневные (без даты)" : "Daily (no date)"}{" "}
-              <span style={{ color: "rgba(255,165,0,0.4)", fontWeight: 400 }}>({dailyNoDate.length})</span>
-            </span>
-          </button>
-          {showDailyNoDate && (
-            <>
-              <div style={{ backgroundColor: "rgba(255,165,0,0.06)", border: "1px solid rgba(255,165,0,0.15)", borderRadius: "10px", padding: "8px 12px", marginBottom: "8px" }}>
-                <p style={{ fontSize: "11px", color: "rgba(255,165,0,0.6)", margin: 0 }}>
-                  {ru ? "Повторяются каждый день. Добавь дату или удали ненужные." : "Repeat daily. Add a date or delete unnecessary ones."}
-                </p>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {dailyNoDate.map((task) => <TaskCard key={task.id} task={task} />)}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Сегодня */}
-      <Section title={`📌 ${ru ? "Сегодня" : "Today"}`} count={todayTasks.length} empty={ru ? "Нет задач на сегодня" : "No tasks today"}>
-        {todayTasks.map((task) => <TaskCard key={task.id} task={task} />)}
-      </Section>
-
-      {/* Завтра */}
-      <Section title={`📋 ${ru ? "Завтра" : "Tomorrow"}`} count={tomorrowTasks.length} empty={ru ? "Нет задач на завтра" : "No tasks tomorrow"}>
-        {tomorrowTasks.map((task) => <TaskCard key={task.id} task={task} />)}
-      </Section>
-
-      {/* Позже */}
-      {otherTasks.length > 0 && (
-        <Section title={`📅 ${ru ? "Позже" : "Later"}`} count={otherTasks.length} empty="">
-          {otherTasks.map((task) => <TaskCard key={task.id} task={task} />)}
-        </Section>
-      )}
-
-      {/* Выполненные */}
-      {doneTasks.length > 0 && (
-        <div style={{ marginBottom: "16px" }}>
-          <button onClick={() => setShowDone(!showDone)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", padding: 0 }}>
-            {showDone ? <ChevronDown size={14} color="rgba(255,255,255,0.35)" /> : <ChevronRight size={14} color="rgba(255,255,255,0.35)" />}
-            <span style={{ fontSize: "14px", fontWeight: 600, color: "rgba(255,255,255,0.4)" }}>
-              ✅ {ru ? "Выполненные" : "Completed"}{" "}
-              <span style={{ color: "rgba(255,255,255,0.2)", fontWeight: 400 }}>({doneTasks.length})</span>
-            </span>
-          </button>
-          {showDone && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              {doneTasks.map((task) => <TaskCard key={task.id} task={task} />)}
-            </div>
-          )}
-        </div>
-      )}
-
-      <style>{`
-        @keyframes pulse-dot {
-          0%, 100% { opacity: 0.4; transform: scale(0.8); }
-          50% { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
     </div>
   );
 }
 
-function Section({ title, count, empty, children }: {
-  title: string; count: number; empty: string; children: React.ReactNode;
+function SectionBlock({ title, tasks, empty }: { title: string; tasks: any[]; empty: string }) {
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <p style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.6)", margin: 0, textTransform: "uppercase", letterSpacing: "0.5px" }}>{title}</p>
+        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.06)", borderRadius: 8, padding: "1px 6px" }}>{tasks.length}</span>
+      </div>
+      {tasks.length === 0
+        ? <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 14, padding: "14px 16px", border: "1px dashed rgba(255,255,255,0.08)" }}>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.2)", margin: 0, textAlign: "center" }}>{empty}</p>
+          </div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{tasks.map((t) => <TaskCard key={t.id} task={t} />)}</div>
+      }
+    </div>
+  );
+}
+
+function Group({ title, count, countColor, open, onToggle, children }: {
+  title: React.ReactNode; count: number; countColor: string; open: boolean; onToggle: () => void; children: React.ReactNode;
 }) {
   return (
-    <div style={{ marginBottom: "20px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
-        <p style={{ fontSize: "14px", fontWeight: 600, color: "rgba(255,255,255,0.7)", margin: 0 }}>{title}</p>
-        <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.25)" }}>({count})</span>
-      </div>
-      {count === 0 ? (
-        <div style={{ backgroundColor: "rgba(255,255,255,0.04)", borderRadius: "14px", padding: "16px", textAlign: "center", border: "1px solid rgba(255,255,255,0.06)" }}>
-          <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.25)", margin: 0 }}>{empty}</p>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>{children}</div>
-      )}
+    <div style={{ marginBottom: 18 }}>
+      <button onClick={onToggle} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, marginBottom: open ? 10 : 0, padding: 0, width: "100%" }}>
+        {open ? <ChevronDown size={14} color="rgba(255,255,255,0.35)" /> : <ChevronRight size={14} color="rgba(255,255,255,0.35)" />}
+        <span style={{ fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>{title}</span>
+        <span style={{ fontSize: 11, color: countColor, background: "rgba(255,255,255,0.06)", borderRadius: 8, padding: "1px 6px", marginLeft: "auto" }}>{count}</span>
+      </button>
+      {open && <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{children}</div>}
     </div>
   );
 }

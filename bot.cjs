@@ -3,7 +3,7 @@
  * ─────────────────────────────────────────────────────────────
  * Возможности:
  *  • Личные задачи через чат с ботом
- *  • Inline-режим: @cortexaibot текст задачи — из любого чата
+ *  • Inline-режим: @aiplannerrubot текст задачи — из любого чата
  *  • Групповые чаты — командные задачи
  *  • Google Calendar интеграция (OAuth2)
  *  • Напоминания, мотивация, подписки
@@ -530,7 +530,7 @@ async function syncTaskToGoogleCalendar(userId, task) {
       },
       source: {
         title: "CortexAI",
-        url:   WEBAPP_URL || "https://t.me/cortexaibot",
+        url:   WEBAPP_URL || "https://t.me/aiplannerrubot",
       },
     };
 
@@ -944,7 +944,7 @@ bot.onText(/\/done(?:\s+(\d+))?/, async (msg, match) => {
 // ────────────────────────────────────────────────────────────────
 bot.onText(/\/subscribe$/, async (msg) => {
   if (isGroup(msg.chat.id)) {
-    await bot.sendMessage(msg.chat.id, "💎 Оформить подписку можно в личном чате с ботом → @cortexaibot");
+    await bot.sendMessage(msg.chat.id, "💎 Оформить подписку можно в личном чате с ботом → @aiplannerrubot");
     return;
   }
   if (isAdmin(String(msg.from.id))) {
@@ -1112,7 +1112,7 @@ bot.on("inline_query", async (query) => {
       type: "article", id: "help",
       title: "📝 Создать задачу",
       description: "Введи название задачи...",
-      input_message_content: { message_text: "🤖 Используй: @cortexaibot текст задачи" },
+      input_message_content: { message_text: "🤖 Используй: @aiplannerrubot текст задачи" },
     }], { cache_time: 0 });
     return;
   }
