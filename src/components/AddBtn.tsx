@@ -58,7 +58,7 @@ export default function AddBtn() {
   const [customDays, setCustomDays] = useState<string[]>([]);
   const [remindBefore, setRemindBefore] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [shoppingItems, setShoppingItems] = useState<string[]>(["""]);
+  const [shoppingItems, setShoppingItems] = useState<string[]>([""]);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const savingRef = useRef(false);
