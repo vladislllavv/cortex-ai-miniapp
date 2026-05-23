@@ -1,10 +1,12 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import TaskCard from "@/components/TaskCard";
+import DraggableTaskList from "@/components/DraggableTaskList";
 import SearchBar from "@/components/SearchBar";
+import AiSmartSort from "@/components/AiSmartSort";
 import { useTaskStore } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
 import {
-  ChevronRight, ChevronDown, Clock, Repeat2, Flame, TrendingUp, Star,
+  ChevronRight, ChevronDown, Clock, Repeat2, Flame, TrendingUp, Timer,
 } from "lucide-react";
 import AssignedTasksBanner from "@/components/AssignedTasksBanner";
 import { useTeamStore } from "@/lib/teamStore";
@@ -12,38 +14,34 @@ import { PERSONAL_WORKSPACE_ID } from "@/lib/workspacePaths";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getAccentGradient, getSecondaryColor } from "@/lib/theme";
 
-// ─── Week chart ────────────────────────────────────────────────────
+// ─── Week chart ───────────────────────────────────────────────────
 function WeekChart({ tasks }: { tasks: any[] }) {
   const { theme } = useTheme();
-  const days = useMemo(() => {
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(); d.setDate(d.getDate() - (6 - i));
-      const ds = d.toISOString().split("T")[0];
-      return {
-        label: d.toLocaleDateString("ru-RU", { weekday: "narrow" }),
-        done: tasks.filter((t) => t.status === "done" && t.completedAt?.startsWith(ds)).length,
-        total: tasks.filter((t) => t.createdAt?.startsWith(ds)).length,
-        isToday: i === 6,
-      };
-    });
-  }, [tasks]);
-  const maxVal = Math.max(...days.map((d) => Math.max(d.total, d.done)), 1);
   const gradient = getAccentGradient(theme);
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (6 - i));
+    const ds = d.toISOString().split("T")[0];
+    return {
+      label: d.toLocaleDateString("ru-RU", { weekday: "narrow" }),
+      done:  tasks.filter((t) => t.status === "done" && t.completedAt?.startsWith(ds)).length,
+      total: tasks.filter((t) => t.createdAt?.startsWith(ds)).length,
+      isToday: i === 6,
+    };
+  }), [tasks]);
+  const maxVal = Math.max(...days.map((d) => Math.max(d.total, d.done)), 1);
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 44 }}>
       {days.map((day, i) => {
-        const totalH = Math.max((day.total / maxVal) * 32, day.total > 0 ? 4 : 0);
-        const doneH  = Math.max((day.done / maxVal) * 32, day.done > 0 ? 4 : 0);
+        const th = Math.max((day.total / maxVal) * 32, day.total > 0 ? 3 : 0);
+        const dh = Math.max((day.done / maxVal) * 32, day.done > 0 ? 3 : 0);
         return (
           <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
             <div style={{ width: "100%", height: 32, borderRadius: 4, background: "rgba(255,255,255,0.07)", position: "relative", overflow: "hidden" }}>
-              {totalH > 0 && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: totalH, background: `${theme.primary}35` }} />}
-              {doneH  > 0 && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: doneH, background: day.isToday ? gradient : `${theme.primary}80`, borderRadius: "0 0 4px 4px" }} />}
+              {th > 0 && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: th, background: `${theme.primary}35` }} />}
+              {dh > 0 && <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: dh, background: day.isToday ? gradient : `${theme.primary}80`, borderRadius: "0 0 4px 4px" }} />}
               {day.isToday && <div style={{ position: "absolute", top: 2, right: 2, width: 4, height: 4, borderRadius: "50%", background: theme.primary }} />}
             </div>
-            <span style={{ fontSize: 9, color: day.isToday ? theme.primary : "rgba(255,255,255,0.25)", fontWeight: day.isToday ? 700 : 400 }}>
-              {day.label}
-            </span>
+            <span style={{ fontSize: 9, color: day.isToday ? theme.primary : "rgba(255,255,255,0.25)", fontWeight: day.isToday ? 700 : 400 }}>{day.label}</span>
           </div>
         );
       })}
@@ -51,24 +49,24 @@ function WeekChart({ tasks }: { tasks: any[] }) {
   );
 }
 
-// ─── Ring progress ─────────────────────────────────────────────────
-function Ring({ value, total, color, size = 60 }: { value: number; total: number; color: string; size?: number }) {
-  const pct  = total > 0 ? value / total : 0;
-  const r    = (size - 8) / 2;
-  const circ = 2 * Math.PI * r;
+// ─── Ring ─────────────────────────────────────────────────────────
+function Ring({ v, total, color, size = 60 }: { v: number; total: number; color: string; size?: number }) {
+  const r = (size - 8) / 2, c = 2 * Math.PI * r, pct = total > 0 ? v / total : 0;
   return (
     <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
       <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={6} />
       <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={6}
-        strokeDasharray={`${circ * pct} ${circ * (1 - pct)}`} strokeLinecap="round"
+        strokeDasharray={`${c * pct} ${c * (1 - pct)}`} strokeLinecap="round"
         style={{ transition: "stroke-dasharray 0.6s ease" }} />
     </svg>
   );
 }
 
-export default function HomePage() {
+interface Props { onOpenPomodoro?: () => void; }
+
+export default function HomePage({ onOpenPomodoro }: Props) {
   const language = useI18nStore((s) => s.language);
-  const tasks     = useTaskStore((s) => s.tasks);
+  const tasks    = useTaskStore((s) => s.tasks);
   const birthdays = useTaskStore((s) => s.birthdays);
   const vacations = useTaskStore((s) => s.vacations);
   const categories     = useTaskStore((s) => s.categories);
@@ -76,7 +74,7 @@ export default function HomePage() {
   const isDataLoaded   = useTaskStore((s) => s.isDataLoaded);
   const activeWorkspaceId = useTaskStore((s) => s.activeWorkspaceId);
   const { workspaces } = useTeamStore();
-  const { theme } = useTheme();
+  const { theme }  = useTheme();
   const ru = language === "ru";
   const gradient = getAccentGradient(theme);
   const sec = getSecondaryColor(theme);
@@ -106,6 +104,9 @@ export default function HomePage() {
   const daily   = useMemo(() => active.filter((t) => t.repeat === "daily" && !t.dueDate), [active]);
   const highPri = useMemo(() => active.filter((t) => t.priority === "high"), [active]);
 
+  // Sort today tasks by sortOrder
+  const todaySorted = useMemo(() => [...todayT].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)), [todayT]);
+
   const rate = tasks.length > 0 ? Math.round((done.length / tasks.length) * 100) : 0;
 
   const [showDone,    setShowDone]    = useState(false);
@@ -126,23 +127,40 @@ export default function HomePage() {
   const h = now.getHours();
   const greeting = ru
     ? (h < 6 ? "Доброй ночи 🌙" : h < 12 ? "Доброе утро ☀️" : h < 18 ? "Добрый день 👋" : "Добрый вечер 🌆")
-    : (h < 6 ? "Good night 🌙"  : h < 12 ? "Good morning ☀️": h < 18 ? "Good afternoon 👋" : "Good evening 🌆");
+    : (h < 6 ? "Good night 🌙"  : h < 12 ? "Good morning ☀️" : h < 18 ? "Good afternoon 👋" : "Good evening 🌆");
 
   return (
     <div style={{ paddingTop: 4 }}>
 
-      {/* ── Header ── */}
-      <div style={{ marginBottom: 16 }}>
-        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", margin: "0 0 2px 0", textTransform: "capitalize" }}>
+      {/* Header */}
+      <div style={{ marginBottom: 14 }}>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: "0 0 2px 0", textTransform: "capitalize" }}>
           {now.toLocaleDateString(ru ? "ru-RU" : "en-US", { weekday: "long", day: "numeric", month: "long" })}
         </p>
-        <h1 style={{ fontSize: 24, fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-0.5px" }}>
-          {greeting}
-        </h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-0.5px" }}>
+            {greeting}
+          </h1>
+          {/* Pomodoro quick-launch */}
+          {onOpenPomodoro && (
+            <button onClick={onOpenPomodoro} style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "6px 12px",
+              background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)",
+              borderRadius: 12, cursor: "pointer", fontFamily: "inherit",
+              transition: "all 0.18s",
+            }}>
+              <Timer size={14} color="#a5b4fc" />
+              <span style={{ fontSize: 12, color: "#a5b4fc", fontWeight: 600 }}>Focus</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* ── Search ── */}
+      {/* Search */}
       <SearchBar />
+
+      {/* AI Smart Sort */}
+      {active.length >= 3 && <AiSmartSort />}
 
       <AssignedTasksBanner />
 
@@ -162,7 +180,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* ── Hero card ── */}
+      {/* Hero progress card */}
       {tasks.length > 0 && (
         <div style={{ background: gradient, borderRadius: 20, padding: "16px 18px 14px", marginBottom: 14, position: "relative", overflow: "hidden" }}>
           <div style={{ position: "absolute", top: -24, right: -24, width: 96, height: 96, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
@@ -172,19 +190,14 @@ export default function HomePage() {
                 {ru ? "Прогресс" : "Progress"}
               </p>
               <p style={{ fontSize: 30, fontWeight: 800, color: "#fff", margin: 0, letterSpacing: "-1px" }}>
-                {done.length}
-                <span style={{ fontSize: 16, fontWeight: 400, color: "rgba(255,255,255,0.6)", marginLeft: 4 }}>/ {tasks.length}</span>
+                {done.length}<span style={{ fontSize: 16, fontWeight: 400, color: "rgba(255,255,255,0.6)", marginLeft: 4 }}>/ {tasks.length}</span>
               </p>
               <p style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", margin: "2px 0 0 0" }}>
-                {overdue.length > 0
-                  ? `⚠️ ${overdue.length} ${ru ? "просрочено" : "overdue"}`
-                  : todayT.length > 0
-                  ? `📌 ${todayT.length} ${ru ? "на сегодня" : "today"}`
-                  : ru ? "Всё идёт по плану ✅" : "All on track ✅"}
+                {overdue.length > 0 ? `⚠️ ${overdue.length} ${ru ? "просрочено" : "overdue"}` : todayT.length > 0 ? `📌 ${todayT.length} ${ru ? "на сегодня" : "today"}` : (ru ? "Всё по плану ✅" : "All on track ✅")}
               </p>
             </div>
             <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Ring value={done.length} total={tasks.length} color="rgba(255,255,255,0.9)" size={60} />
+              <Ring v={done.length} total={tasks.length} color="rgba(255,255,255,0.9)" size={60} />
               <span style={{ position: "absolute", fontSize: 13, fontWeight: 800, color: "#fff" }}>{rate}%</span>
             </div>
           </div>
@@ -197,13 +210,13 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* ── Stats row ── */}
+      {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 18 }}>
         {[
           { label: ru ? "Всего" : "Total",   v: active.length,  c: theme.primary, e: "📋" },
           { label: ru ? "Сегодня" : "Today", v: todayT.length,  c: sec,           e: "📌" },
           { label: ru ? "Готово" : "Done",   v: done.length,    c: "#22c55e",     e: "✅" },
-          { label: ru ? "🔴" : "🔴",         v: highPri.length, c: highPri.length > 0 ? "#ef4444" : "rgba(255,255,255,0.3)", e: "🔴" },
+          { label: "🔴",                      v: highPri.length, c: highPri.length > 0 ? "#ef4444" : "rgba(255,255,255,0.3)", e: "🔴" },
         ].map((s) => (
           <div key={s.label} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: "10px 8px", textAlign: "center" }}>
             <p style={{ fontSize: 14, margin: "0 0 2px 0" }}>{s.e}</p>
@@ -213,7 +226,7 @@ export default function HomePage() {
         ))}
       </div>
 
-      {/* ── Birthdays ── */}
+      {/* Birthdays */}
       {todayBirths.length > 0 && (
         <div style={{ background: `${theme.primary}15`, border: `1px solid ${theme.primary}30`, borderRadius: 16, padding: "12px 16px", marginBottom: 10, display: "flex", gap: 12, alignItems: "center" }}>
           <span style={{ fontSize: 24 }}>🎂</span>
@@ -230,7 +243,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* ── Category sections ── */}
+      {/* Categories */}
       {!isTeam && categories.length > 0 && (
         <div style={{ marginBottom: 18 }}>
           <p style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.8px", margin: "0 0 8px 0" }}>{ru ? "Разделы" : "Sections"}</p>
@@ -266,17 +279,17 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* ── High priority banner ── */}
+      {/* High priority banner */}
       {highPri.length > 0 && (
         <div style={{ background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.18)", borderRadius: 14, padding: "10px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
-          <Flame size={16} color="#ef4444" />
+          <Flame size={15} color="#ef4444" />
           <p style={{ fontSize: 13, color: "#fca5a5", margin: 0, fontWeight: 500 }}>
             {highPri.length} {ru ? "задач высокого приоритета" : "high-priority tasks"}
           </p>
         </div>
       )}
 
-      {/* ── Overdue ── */}
+      {/* Overdue */}
       {overdue.length > 0 && (
         <Group icon={<Flame size={12} color="#ef4444" />} label={ru ? "Просрочено" : "Overdue"} labelColor="#ef4444" count={overdue.length} open={showOverdue} onToggle={() => setShowOverdue(!showOverdue)}>
           {overdue.map((t) => <TaskCard key={t.id} task={t} />)}
@@ -290,8 +303,27 @@ export default function HomePage() {
         </Group>
       )}
 
-      {/* Today */}
-      <SB title={ru ? "Сегодня" : "Today"} emoji="📌" tasks={todayT} empty={ru ? "На сегодня задач нет" : "No tasks today"} />
+      {/* Today — with drag & drop */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 13 }}>📌</span>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", margin: 0, textTransform: "uppercase", letterSpacing: "0.6px" }}>{ru ? "Сегодня" : "Today"}</p>
+          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.06)", borderRadius: 7, padding: "1px 6px" }}>{todayT.length}</span>
+          {todayT.length > 1 && (
+            <span style={{ fontSize: 9, color: "rgba(255,255,255,0.25)", marginLeft: 4 }}>
+              {ru ? "↕ перетащи для сортировки" : "↕ drag to reorder"}
+            </span>
+          )}
+        </div>
+        {todayT.length === 0
+          ? <div style={{ background: "rgba(255,255,255,0.03)", borderRadius: 12, padding: "12px 16px", border: "1px dashed rgba(255,255,255,0.07)" }}>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.2)", margin: 0, textAlign: "center" }}>{ru ? "На сегодня задач нет" : "No tasks today"}</p>
+            </div>
+          : <DraggableTaskList tasks={todaySorted} />
+        }
+      </div>
+
+      {/* Tomorrow */}
       <SB title={ru ? "Завтра" : "Tomorrow"} emoji="📋" tasks={tmrT} empty={ru ? "На завтра задач нет" : "No tasks tomorrow"} />
       {later.length > 0 && <SB title={ru ? "Позже" : "Later"} emoji="📅" tasks={later} empty="" />}
 
@@ -309,7 +341,7 @@ export default function HomePage() {
         </Group>
       )}
 
-      {/* Empty state */}
+      {/* Empty */}
       {active.length === 0 && done.length === 0 && isDataLoaded && (
         <div style={{ textAlign: "center", padding: "44px 20px" }}>
           <p style={{ fontSize: 52, margin: "0 0 12px 0" }}>✨</p>
@@ -342,8 +374,7 @@ function SB({ title, emoji, tasks, empty }: { title: string; emoji: string; task
 }
 
 function Group({ icon, label, labelColor, count, open, onToggle, children }: {
-  icon: React.ReactNode; label: string; labelColor: string;
-  count: number; open: boolean; onToggle: () => void; children: React.ReactNode;
+  icon: React.ReactNode; label: string; labelColor: string; count: number; open: boolean; onToggle: () => void; children: React.ReactNode;
 }) {
   return (
     <div style={{ marginBottom: 16 }}>
