@@ -6,7 +6,7 @@ import {
   TaskPriority,
   useTaskStore,
   checkSubscription,
-  getTelegramUserId,
+  getSafeUserId,
 } from "@/lib/store";
 
 const priorityOptions = [
@@ -113,7 +113,7 @@ export default function AddBtn() {
       const todayTasks = tasks.filter((t) => t.createdAt.startsWith(todayStr));
 
       if (todayTasks.length >= 5) {
-        const userId = getTelegramUserId();
+        const userId = getSafeUserId();
         const hasSub =
           userId !== "unknown" ? await checkSubscription(userId) : false;
         if (!hasSub) {

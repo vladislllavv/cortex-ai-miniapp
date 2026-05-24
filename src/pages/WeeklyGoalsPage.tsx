@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useI18nStore } from "@/lib/i18n";
-import { useTaskStore, getTelegramUserId } from "@/lib/store";
+import { useTaskStore, getSafeUserId } from "@/lib/store";
 import { db } from "@/lib/firebase";
 import {
   doc, getDoc, setDoc, collection,
@@ -33,7 +33,7 @@ export default function WeeklyGoalsPage() {
   const addTask = useTaskStore((state) => state.addTask);
   const { theme } = useTheme();
   const ru = language === "ru";
-  const userId = getTelegramUserId();
+  const userId = getSafeUserId();
 
   const [goals, setGoals] = useState<WeeklyGoal[]>([]);
   const [editingGoal, setEditingGoal] = useState<string | null>(null);
@@ -47,10 +47,7 @@ export default function WeeklyGoalsPage() {
   const completedCount = currentWeekGoals.filter((g) => g.completed).length;
 
   useEffect(() => {
-    if (userId === "unknown") {
-      setLoading(false);
-      return;
-    }
+    
     const load = async () => {
       setLoading(true);
       try {
@@ -76,7 +73,7 @@ export default function WeeklyGoalsPage() {
       g.id === id ? { ...g, completed: !g.completed } : g
     );
     setGoals(updated);
-    if (userId !== "unknown") {
+    if (userId) {
       const goal = updated.find((g) => g.id === id);
       if (goal)
         await setDoc(
@@ -103,7 +100,7 @@ export default function WeeklyGoalsPage() {
     setNewGoalText("");
     setShowAddGoal(false);
 
-    if (userId !== "unknown") {
+    if (userId) {
       await setDoc(
         doc(db, "users", userId, "weeklyGoals", goalId),
         newGoal
@@ -124,7 +121,7 @@ export default function WeeklyGoalsPage() {
 
   const deleteGoal = async (id: string) => {
     setGoals((prev) => prev.filter((g) => g.id !== id));
-    if (userId !== "unknown") {
+    if (userId) {
       await deleteDoc(
         doc(db, "users", userId, "weeklyGoals", id)
       ).catch(() => {});
@@ -138,7 +135,7 @@ export default function WeeklyGoalsPage() {
     );
     setGoals(updated);
     setEditingGoal(null);
-    if (userId !== "unknown") {
+    if (userId) {
       const goal = updated.find((g) => g.id === id);
       if (goal)
         await setDoc(

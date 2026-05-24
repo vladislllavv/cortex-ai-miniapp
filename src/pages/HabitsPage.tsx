@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useI18nStore } from "@/lib/i18n";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useHabitsStore, Habit, getTodayStr } from "@/lib/habitsStore";
-import { getTelegramUserId } from "@/lib/store";
+import { getSafeUserId } from "@/lib/store";
 import { Plus, Flame, Trophy, X, Check, Archive } from "lucide-react";
 import { getAccentGradient } from "@/lib/theme";
 
@@ -22,8 +22,8 @@ export default function HabitsPage() {
   const language = useI18nStore((s) => s.language);
   const { theme } = useTheme();
   const ru = language === "ru";
-  const userId = getTelegramUserId();
-  const safeId = userId !== "unknown" ? userId : (localStorage.getItem("cortex-anon-uid") || userId);
+  
+  const safeId = getSafeUserId();
 
   const { habits, subscribe, toggleToday, addHabit, deleteHabit, archiveHabit } = useHabitsStore();
   const [showAdd, setShowAdd] = useState(false);

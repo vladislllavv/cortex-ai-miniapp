@@ -6,7 +6,7 @@ import TeamPage from "./TeamPage";
 import HabitsPage from "./HabitsPage";
 import { useNavStore } from "@/lib/navStore";
 import { useTheme } from "@/contexts/ThemeContext";
-import { getTelegramUserId, useTaskStore } from "@/lib/store";
+import { getTelegramUserId, getSafeUserId, useTaskStore } from "@/lib/store";
 import { getAccentGradient } from "@/lib/theme";
 
 type SubView = null | "settings" | "goals" | "team" | "habits";
@@ -39,7 +39,7 @@ export default function MorePage() {
   const setSubView = useNavStore((s) => s.setMoreSubView) as (v: SubView) => void;
   const { theme } = useTheme();
   const tasks  = useTaskStore((s) => s.tasks);
-  const userId = getTelegramUserId();
+  const userId = getTelegramUserId(); // raw TG id for display
   const gradient = getAccentGradient(theme);
 
   const BackBtn = ({ label }: { label: string }) => (

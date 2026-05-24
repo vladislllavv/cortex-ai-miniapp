@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
-  useTaskStore, checkSubscription, getTelegramUserId,
+  useTaskStore, checkSubscription, getTelegramUserId, getSafeUserId,
   saveChatHistory, loadChatHistory, loadChatFromFirebase, ChatMessage,
 } from "@/lib/store";
 import { useI18nStore } from "@/lib/i18n";
@@ -58,11 +58,11 @@ export default function AiProcessPage({ embedded = false }: { embedded?: boolean
   const recRef     = useRef<any>(null);
   const endRef     = useRef<HTMLDivElement>(null);
   const taRef      = useRef<HTMLTextAreaElement>(null);
-  const userId     = getTelegramUserId();
+  const userId     = getSafeUserId();
 
   useEffect(() => {
     checkSubscription(userId).then(setHasSub);
-    if (userId !== "unknown") {
+    if (userId) {
       loadChatFromFirebase(userId, "ai-assistant").then((m) => {
         if (m.length) setMessages(m as ChatMessage[]);
         setLoaded(true);

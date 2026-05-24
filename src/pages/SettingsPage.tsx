@@ -1,7 +1,7 @@
 import { useI18nStore } from "@/lib/i18n";
 import {
   useTaskStore,
-  getTelegramUserId,
+  getTelegramUserId, getSafeUserId,
   getSubscriptionInfo,
   checkSubscription,
   CustomCategory,
@@ -101,7 +101,7 @@ export default function SettingsPage() {
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const id = getTelegramUserId();
+    const id = getSafeUserId();
     setUserId(id);
     setSubLoading(true);
     Promise.all([getSubscriptionInfo(id), checkSubscription(id)])
@@ -146,7 +146,7 @@ export default function SettingsPage() {
             enabled: true,
           };
           setMotivationSettings(newSettings);
-          if (userId && userId !== "unknown")
+          if (userId)
             await saveMotivationSettingsFn(userId, newSettings);
           tg.showAlert(
             ru
@@ -184,7 +184,7 @@ export default function SettingsPage() {
   >(key: K, value: MotivationSettings[K]) {
     const newSettings = { ...motivationSettings, [key]: value };
     setMotivationSettings(newSettings);
-    if (userId && userId !== "unknown")
+    if (userId)
       await saveMotivationSettingsFn(userId, newSettings);
   }
 
@@ -194,7 +194,7 @@ export default function SettingsPage() {
       enabled: false,
     };
     setMotivationSettings(newSettings);
-    if (userId && userId !== "unknown")
+    if (userId)
       await saveMotivationSettingsFn(userId, newSettings);
   }
 
@@ -279,7 +279,7 @@ export default function SettingsPage() {
         if (!confirmed) return;
         setDeletingAll(true);
         try {
-          const uid = getTelegramUserId();
+          const uid = getSafeUserId();
           if (uid !== "unknown") {
             // Удаляем из workspace
             const workspaceId =

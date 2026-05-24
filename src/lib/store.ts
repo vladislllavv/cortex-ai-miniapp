@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { useEffect } from "react";
-import { db } from "./firebase";
+import { db, ensureAuth } from "./firebase";
 import {
   collection,
   Timestamp,
@@ -217,6 +217,20 @@ export function getTelegramUserId(): string {
   return "unknown";
 }
 
+/** Всегда возвращает валидный userId — Telegram или анонимный из localStorage */
+export function getSafeUserId(): string {
+  const tgId = getTelegramUserId();
+  if (tgId !== "unknown") return tgId;
+  // Стабильный анонимный ID
+  const key = "cortex-anon-uid";
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `anon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
 // ============ SUBSCRIPTION ============
 
 export async function checkSubscription(userId: string): Promise<boolean> {
@@ -385,7 +399,8 @@ async function saveTaskToFirebase(
   userId: string,
   workspaceId: string
 ) {
-  if (userId === "unknown") return;
+  if (!userId || userId === "unknown") return;
+  await ensureAuth(); // ensure Firebase Auth before write
   try {
     const offset = task.reminderOffsetMinutes ?? 0;
     let reminderAt = null;
@@ -414,7 +429,8 @@ async function upsertBotTask(
   userId: string,
   workspaceId: string
 ) {
-  if (userId === "unknown" || !task.dueDate) return;
+  if (!userId || userId === "unknown" || !task.dueDate) return;
+  await ensureAuth();
   try {
     const dueDate = new Date(task.dueDate);
     if (isNaN(dueDate.getTime())) return;
@@ -485,7 +501,8 @@ async function deleteTaskFromFirebase(
   userId: string,
   workspaceId: string
 ) {
-  if (userId === "unknown") return;
+  if (!userId || userId === "unknown") return;
+  await ensureAuth();
   try {
     await deleteDoc(
       doc(db, paths.task(userId, workspaceId, taskId))
@@ -571,8 +588,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   addTask: async (task) => {
-    const userId = getTelegramUserId();
+    const userId = getSafeUserId();
     const workspaceId = get().activeWorkspaceId;
+    await ensureAuth(); // ensure auth before Firebase write
 
     const newTask: Task = {
       ...task,
@@ -606,7 +624,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   updateTask: (taskId, updates) => {
-    const userId = getTelegramUserId();
+    const userId = getSafeUserId();
     const workspaceId = get().activeWorkspaceId;
 
     set((state) => {
@@ -643,7 +661,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   deleteTask: (taskId) => {
-    const userId = getTelegramUserId();
+    const userId = getSafeUserId();
     const workspaceId = get().activeWorkspaceId;
 
     set((state) => {
@@ -658,7 +676,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   toggleTaskStatus: (taskId) => {
-    const userId = getTelegramUserId();
+    const userId = getSafeUserId();
     const workspaceId = get().activeWorkspaceId;
     const now = new Date().toISOString();
 
@@ -691,9 +709,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const id = crypto.randomUUID();
     const nb: Birthday = { ...birthday, id };
     set((s) => ({ birthdays: [...s.birthdays, nb] }));
-    const userId = getTelegramUserId();
-    if (userId !== "unknown")
-      setDoc(doc(db, paths.birthday(userId, id)), nb).catch(
+    const userId = getSafeUserId();
+    await ensureAuth();
+    setDoc(doc(db, paths.birthday(userId, id)), nb).catch(
         console.error
       );
   },
@@ -702,9 +720,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set((s) => ({
       birthdays: s.birthdays.filter((b) => b.id !== id),
     }));
-    const userId = getTelegramUserId();
-    if (userId !== "unknown")
-      deleteDoc(doc(db, paths.birthday(userId, id))).catch(
+    const userId = getSafeUserId();
+    await ensureAuth();
+    deleteDoc(doc(db, paths.birthday(userId, id))).catch(
         console.error
       );
   },
@@ -713,9 +731,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const id = crypto.randomUUID();
     const nv: Vacation = { ...vacation, id };
     set((s) => ({ vacations: [...s.vacations, nv] }));
-    const userId = getTelegramUserId();
-    if (userId !== "unknown")
-      setDoc(doc(db, paths.vacation(userId, id)), nv).catch(
+    const userId = getSafeUserId();
+    await ensureAuth();
+    setDoc(doc(db, paths.vacation(userId, id)), nv).catch(
         console.error
       );
   },
@@ -724,9 +742,9 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     set((s) => ({
       vacations: s.vacations.filter((v) => v.id !== id),
     }));
-    const userId = getTelegramUserId();
-    if (userId !== "unknown")
-      deleteDoc(doc(db, paths.vacation(userId, id))).catch(
+    const userId = getSafeUserId();
+    await ensureAuth();
+    deleteDoc(doc(db, paths.vacation(userId, id))).catch(
         console.error
       );
   },
@@ -790,10 +808,11 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   loadUserData: async (userId, workspaceId) => {
-    if (userId === "unknown") {
+    if (!userId) {
       set({ isDataLoaded: true });
       return;
     }
+    await ensureAuth(); // ensure auth before Firebase reads
     try {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
@@ -940,7 +959,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
 
   startSync: (userId, workspaceId) => {
-    if (userId === "unknown") return () => {};
+    if (!userId) return () => {};
 
     const unsub = onSnapshot(
       collection(db, paths.tasks(userId, workspaceId)),

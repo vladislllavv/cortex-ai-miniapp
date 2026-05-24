@@ -3,7 +3,7 @@ import {
 } from "react";
 import { useI18nStore } from "@/lib/i18n";
 import {
-  useTaskStore, getTelegramUserId, checkSubscription,
+  useTaskStore, getTelegramUserId, getSafeUserId, checkSubscription,
   saveCoachChatHistory, loadCoachChatHistory, loadChatFromFirebase, ChatMessage,
 } from "@/lib/store";
 import { db } from "@/lib/firebase";
@@ -53,7 +53,7 @@ export default function CoachPage({ embedded = false }: { embedded?: boolean }) 
   const addTask    = useTaskStore((s) => s.addTask);
   const { theme }  = useTheme();
   const ru         = language === "ru";
-  const userId     = getTelegramUserId();
+  const userId     = getSafeUserId();
   const goSettings = useNavStore((s) => s.goToMoreSettings);
 
   const [messages,  setMessages]  = useState<ChatMessage[]>([]);
@@ -79,7 +79,7 @@ export default function CoachPage({ embedded = false }: { embedded?: boolean }) 
 
   useEffect(() => {
     checkSubscription(userId).then(setHasSub);
-    if (userId !== "unknown") {
+    if (userId) {
       getDoc(doc(db, "users", userId, "settings", "profile"))
         .then((s) => { if (s.exists()) setProfile(s.data() as UserProfile); }).catch(() => {});
       getDocs(collection(db, "users", userId, "weeklyGoals"))
@@ -172,7 +172,7 @@ export default function CoachPage({ embedded = false }: { embedded?: boolean }) 
           for (const g of JSON.parse(gMatch[1])) {
             if (g.text?.trim().length > 1) {
               const gid = `goal_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-              if (userId !== "unknown") {
+              if (userId) {
                 setDoc(doc(db, "users", userId, "weeklyGoals", gid), {
                   id: gid, text: g.text.trim(), completed: false,
                   weekStart: getWeekStart(), createdAt: new Date().toISOString(), dueDate: g.dueDate || null,
