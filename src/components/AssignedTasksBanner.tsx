@@ -21,7 +21,7 @@ export default function AssignedTasksBanner() {
 
   // Считаем задачи назначенные мне во всех командах
   const myAssignedTasks = useMemo(() => {
-    if (!uid || uid === "unknown") return [];
+    if (!uid) return [];
 
     // 1. Из текущего workspace (если это команда)
     const fromCurrentTaskStore = tasks.filter(

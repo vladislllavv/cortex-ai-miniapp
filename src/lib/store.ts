@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { useEffect } from "react";
-import { db, ensureAuth } from "./firebase";
+import { db } from "./firebase";
 import {
   collection,
   Timestamp,
@@ -145,9 +145,8 @@ export function saveChatHistory(messages: ChatMessage[]) {
   try {
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
   } catch {}
-  const userId = getTelegramUserId();
-  if (userId !== "unknown")
-    saveChatToFirebase(userId, "ai-assistant", messages).catch(() => {});
+  const userId = getSafeUserId();
+  saveChatToFirebase(userId, "ai-assistant", messages).catch(() => {});
 }
 
 export function loadChatHistory(): ChatMessage[] {
@@ -162,9 +161,8 @@ export function saveCoachChatHistory(messages: ChatMessage[]) {
   try {
     localStorage.setItem(COACH_CHAT_STORAGE_KEY, JSON.stringify(messages));
   } catch {}
-  const userId = getTelegramUserId();
-  if (userId !== "unknown")
-    saveChatToFirebase(userId, "ai-coach", messages).catch(() => {});
+  const userId = getSafeUserId();
+  saveChatToFirebase(userId, "ai-coach", messages).catch(() => {});
 }
 
 export function loadCoachChatHistory(): ChatMessage[] {
@@ -180,7 +178,7 @@ async function saveChatToFirebase(
   chatId: string,
   messages: ChatMessage[]
 ) {
-  if (userId === "unknown") return;
+  if (!userId) return;
   try {
     await setDoc(doc(db, paths.chat(userId, chatId)), {
       messages: messages.slice(-50),
@@ -196,7 +194,7 @@ export async function loadChatFromFirebase(
   userId: string,
   chatId: string
 ): Promise<ChatMessage[]> {
-  if (userId === "unknown") return [];
+  if (!userId) return [];
   try {
     const snap = await getDoc(doc(db, paths.chat(userId, chatId)));
     if (snap.exists())
@@ -235,7 +233,7 @@ export function getSafeUserId(): string {
 
 export async function checkSubscription(userId: string): Promise<boolean> {
   try {
-    if (userId === "unknown") return false;
+    if (!userId) return false;
     const d = await getDoc(doc(db, paths.subscription(userId)));
     if (!d.exists()) return false;
     const data = d.data();
@@ -252,7 +250,7 @@ export async function getSubscriptionInfo(userId: string): Promise<{
   daysLeft: number;
 }> {
   try {
-    if (userId === "unknown")
+    if (!userId)
       return { isActive: false, expiresAt: null, daysLeft: 0 };
     const d = await getDoc(doc(db, paths.subscription(userId)));
     if (!d.exists())
@@ -399,8 +397,7 @@ async function saveTaskToFirebase(
   userId: string,
   workspaceId: string
 ) {
-  if (!userId || userId === "unknown") return;
-  await ensureAuth(); // ensure Firebase Auth before write
+  if (!userId) return;
   try {
     const offset = task.reminderOffsetMinutes ?? 0;
     let reminderAt = null;
@@ -429,8 +426,7 @@ async function upsertBotTask(
   userId: string,
   workspaceId: string
 ) {
-  if (!userId || userId === "unknown" || !task.dueDate) return;
-  await ensureAuth();
+  if (!userId || !task.dueDate) return;
   try {
     const dueDate = new Date(task.dueDate);
     if (isNaN(dueDate.getTime())) return;
@@ -501,8 +497,7 @@ async function deleteTaskFromFirebase(
   userId: string,
   workspaceId: string
 ) {
-  if (!userId || userId === "unknown") return;
-  await ensureAuth();
+  if (!userId) return;
   try {
     await deleteDoc(
       doc(db, paths.task(userId, workspaceId, taskId))
@@ -590,8 +585,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   addTask: async (task) => {
     const userId = getSafeUserId();
     const workspaceId = get().activeWorkspaceId;
-    await ensureAuth(); // ensure auth before Firebase write
-
+  
     const newTask: Task = {
       ...task,
       id: crypto.randomUUID(),
@@ -710,8 +704,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const nb: Birthday = { ...birthday, id };
     set((s) => ({ birthdays: [...s.birthdays, nb] }));
     const userId = getSafeUserId();
-    await ensureAuth();
-    setDoc(doc(db, paths.birthday(userId, id)), nb).catch(
+      setDoc(doc(db, paths.birthday(userId, id)), nb).catch(
         console.error
       );
   },
@@ -721,8 +714,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       birthdays: s.birthdays.filter((b) => b.id !== id),
     }));
     const userId = getSafeUserId();
-    await ensureAuth();
-    deleteDoc(doc(db, paths.birthday(userId, id))).catch(
+      deleteDoc(doc(db, paths.birthday(userId, id))).catch(
         console.error
       );
   },
@@ -732,8 +724,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     const nv: Vacation = { ...vacation, id };
     set((s) => ({ vacations: [...s.vacations, nv] }));
     const userId = getSafeUserId();
-    await ensureAuth();
-    setDoc(doc(db, paths.vacation(userId, id)), nv).catch(
+      setDoc(doc(db, paths.vacation(userId, id)), nv).catch(
         console.error
       );
   },
@@ -743,8 +734,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       vacations: s.vacations.filter((v) => v.id !== id),
     }));
     const userId = getSafeUserId();
-    await ensureAuth();
-    deleteDoc(doc(db, paths.vacation(userId, id))).catch(
+      deleteDoc(doc(db, paths.vacation(userId, id))).catch(
         console.error
       );
   },
@@ -812,8 +802,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       set({ isDataLoaded: true });
       return;
     }
-    await ensureAuth(); // ensure auth before Firebase reads
-    try {
+      try {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
       const todayStr = new Date().toISOString().split("T")[0];

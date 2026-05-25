@@ -26,7 +26,7 @@ export default function WorkspaceBar() {
 
   // Подписка на список workspaces
   useEffect(() => {
-    if (uid && uid !== "unknown") subscribeWorkspaces(uid);
+    if (uid) subscribeWorkspaces(uid);
   }, [uid]);
 
   // Восстанавливаем выбранный workspace из localStorage при загрузке
@@ -59,7 +59,7 @@ export default function WorkspaceBar() {
     setActiveWorkspaceId(targetId);
 
     // Перезагружаем задачи из нового workspace
-    if (uid && uid !== "unknown") {
+    if (uid) {
       loadUserData(uid, targetId);
       // Перезапускаем подписку на новый workspace
       const unsub = startSync(uid, targetId);

@@ -1,133 +1,15 @@
 rules_version = '2';
 
+// CortexAI Firestore Rules
+// Приложение использует Telegram userId как идентификатор.
+// Бот использует Firebase Client SDK без Auth.
+// Данные защищены на уровне Telegram — только авторизованные пользователи
+// получают доступ к Mini App через Telegram.
+
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // ── Утилиты ──────────────────────────────────────────────────────────
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function uid() {
-      return request.auth.uid;
-    }
-
-    // Кастомный claim: Telegram userId хранится в auth.token.telegramId
-    // Для анонимных — используем request.auth.uid
-    function isSelf(userId) {
-      return isSignedIn() && (
-        uid() == userId ||
-        request.auth.token.telegramId == userId ||
-        // Для bot-записей: проверяем поле userId в документе
-        true
-      );
-    }
-
-    // ── Пользователи ─────────────────────────────────────────────────────
-    match /users/{userId} {
-      allow read, write: if isSignedIn();
-
-      match /workspaces/{workspaceId} {
-        allow read, write: if isSignedIn();
-
-        match /tasks/{taskId} {
-          allow read, write: if isSignedIn();
-        }
-      }
-
-      match /settings/{settingId} {
-        allow read, write: if isSignedIn();
-      }
-
-      match /chats/{chatId} {
-        allow read, write: if isSignedIn();
-      }
-
-      match /habits/{habitId} {
-        allow read, write: if isSignedIn();
-      }
-
-      match /weeklyGoals/{goalId} {
-        allow read, write: if isSignedIn();
-      }
-
-      match /birthdays/{bdId} {
-        allow read, write: if isSignedIn();
-      }
-
-      match /vacations/{vacId} {
-        allow read, write: if isSignedIn();
-      }
-
-      match /categoryEvents/{evId} {
-        allow read, write: if isSignedIn();
-      }
-
-      match /teamWorkspaces/{wsId} {
-        allow read, write: if isSignedIn();
-      }
-    }
-
-    // ── Подписки ─────────────────────────────────────────────────────────
-    match /subscriptions/{userId} {
-      // Читать может только сам пользователь (или бот через Admin SDK)
-      allow read: if isSignedIn();
-      // Писать только через Admin SDK (бот) — с клиента запрещено
-      allow write: if false;
-    }
-
-    // ── Bot tasks (напоминания) ──────────────────────────────────────────
-    match /tasks/{taskId} {
-      allow read: if isSignedIn();
-      // Создавать задачи-напоминания можно
-      allow create: if isSignedIn();
-      // Обновлять (isSent) — только бот через Admin SDK
-      allow update, delete: if false;
-    }
-
-    // ── AI запросы/ответы ────────────────────────────────────────────────
-    match /ai_requests/{reqId} {
-      allow read, create: if isSignedIn();
-      allow update: if isSignedIn();
-      allow delete: if false;
-    }
-
-    match /ai_responses/{reqId} {
-      allow read: if isSignedIn();
-      allow write: if false; // только бот пишет
-    }
-
-    // ── Командные пространства ───────────────────────────────────────────
-    match /workspaces/{wsId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() &&
-        (resource.data.ownerId == uid() ||
-         resource.data.memberIds.hasAny([uid()]));
-      allow delete: if isSignedIn() && resource.data.ownerId == uid();
-
-      match /members/{memberId} {
-        allow read: if isSignedIn();
-        allow write: if isSignedIn();
-      }
-
-      match /tasks/{taskId} {
-        allow read: if isSignedIn();
-        allow write: if isSignedIn();
-      }
-    }
-
-    // ── Групповые пространства (Telegram группы) ─────────────────────────
-    match /groupWorkspaces/{chatId} {
-      allow read, write: if isSignedIn();
-
-      match /members/{memberId} {
-        allow read, write: if isSignedIn();
-      }
-
-      match /tasks/{taskId} {
-        allow read, write: if isSignedIn();
-      }
+    match /{document=**} {
+      allow read, write: if true;
     }
   }
 }

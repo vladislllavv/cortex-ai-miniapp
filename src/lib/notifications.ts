@@ -1,7 +1,7 @@
 // Клиент для отправки уведомлений через Cloudflare Worker
 
 // ⚠️ ЗАМЕНИ на URL твоего Worker'а уведомлений
-const NOTIFICATIONS_WORKER_URL = "https://cortexai-notifications.cortexai-notifications.bubo-buboff.workers.dev.workers.dev";
+const NOTIFICATIONS_WORKER_URL = "https://ancient-river-8a20.bubo-buboff.workers.dev"; // Using main worker
 
 export type NotificationType =
   | "task_assigned"

@@ -115,7 +115,7 @@ export default function AddBtn() {
       if (todayTasks.length >= 5) {
         const userId = getSafeUserId();
         const hasSub =
-          userId !== "unknown" ? await checkSubscription(userId) : false;
+          userId ? await checkSubscription(userId) : false;
         if (!hasSub) {
           const tg = (window as any).Telegram?.WebApp;
           tg?.showAlert(

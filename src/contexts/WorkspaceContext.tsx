@@ -82,7 +82,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren) {
 
   const loadWorkspaces = useCallback(
     async (userId: string) => {
-      if (!userId || userId === "unknown") {
+      if (!userId) {
         setIsLoaded(true);
         return;
       }
