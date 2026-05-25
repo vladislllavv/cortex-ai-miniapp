@@ -9,11 +9,10 @@ export type TgUser = {
 type HapticStyle = "light" | "medium" | "heavy" | "success" | "error" | "warning";
 
 // ═══════════════════════════════════════════════════════════════════
-// НАСТРОЙКИ БОТА — ЗАМЕНИ НА СВОИ
+// НАСТРОЙКИ — реальный username бота
 // ═══════════════════════════════════════════════════════════════════
-export const BOT_USERNAME = "CortexAITaskBot";
-export const APP_NAME = "app";
-// ═══════════════════════════════════════════════════════════════════
+export const BOT_USERNAME = "aiplannerrubot";
+export const APP_NAME     = "cortexai"; // не используется в ссылках — ссылка идёт через бота
 
 // ─── Базовые функции ────────────────────────────────────────────────
 
@@ -41,82 +40,21 @@ export function triggerHaptic(style: HapticStyle = "light"): void {
 export function showAlert(message: string): void {
   try {
     const tg = (window as any).Telegram?.WebApp;
-    if (tg?.showAlert) {
-      tg.showAlert(message);
-    } else {
-      alert(message);
-    }
+    if (tg?.showAlert) { tg.showAlert(message); }
+    else { alert(message); }
   } catch {}
 }
 
 export function showConfirm(message: string, callback: (confirmed: boolean) => void): void {
   try {
     const tg = (window as any).Telegram?.WebApp;
-    if (tg?.showConfirm) {
-      tg.showConfirm(message, callback);
-    } else {
-      callback(window.confirm(message));
-    }
+    if (tg?.showConfirm) { tg.showConfirm(message, callback); }
+    else { callback(window.confirm(message)); }
   } catch {}
 }
 
-export function openTelegramLink(url: string): void {
-  try {
-    const tg = (window as any).Telegram?.WebApp;
-    if (tg?.openTelegramLink) {
-      tg.openTelegramLink(url);
-    } else {
-      window.open(url, "_blank");
-    }
-  } catch {}
-}
-
-export function getTelegramUser(): TgUser | null {
-  try {
-    const tg = (window as any).Telegram?.WebApp;
-    const user = tg?.initDataUnsafe?.user;
-    if (!user?.id) return null;
-    return {
-      id: String(user.id),
-      first_name: user.first_name,
-      last_name: user.last_name,
-      username: user.username,
-      photo_url: user.photo_url,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function closeMiniApp(): void {
-  try {
-    const tg = (window as any).Telegram?.WebApp;
-    tg?.close?.();
-  } catch {}
-}
-
-// ─── Алиасы для team-функционала ────────────────────────────────────
-
-export const haptic = triggerHaptic;
-export const getTgUser = getTelegramUser;
-
-export const tgAlert = (message: string): Promise<void> =>
-  new Promise((resolve) => {
-    try {
-      const tg = (window as any).Telegram?.WebApp;
-      if (tg?.showAlert) {
-        tg.showAlert(message, () => resolve());
-      } else {
-        alert(message);
-        resolve();
-      }
-    } catch {
-      resolve();
-    }
-  });
-
-export const tgConfirm = (message: string): Promise<boolean> =>
-  new Promise((resolve) => {
+export async function tgConfirm(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
     try {
       const tg = (window as any).Telegram?.WebApp;
       if (tg?.showConfirm) {
@@ -128,29 +66,49 @@ export const tgConfirm = (message: string): Promise<boolean> =>
       resolve(false);
     }
   });
+}
 
-// ─── Инвайт-ссылки и старт-параметры ────────────────────────────────
-
-export function getStartParam(): string | null {
+export function getTelegramUser(): TgUser | null {
   try {
     const tg = (window as any).Telegram?.WebApp;
-    return tg?.initDataUnsafe?.start_param || null;
+    const user = tg?.initDataUnsafe?.user;
+    if (!user?.id) return null;
+    return {
+      id:         String(user.id),
+      first_name: user.first_name,
+      last_name:  user.last_name,
+      username:   user.username,
+      photo_url:  user.photo_url,
+    };
   } catch {
     return null;
   }
 }
 
-export function parseStartParam(): { type: "join"; code: string } | null {
-  const param = getStartParam();
-  if (!param) return null;
-  if (param.startsWith("join_")) {
-    return { type: "join", code: param.substring(5) };
-  }
-  return null;
+export function closeMiniApp(): void {
+  try { (window as any).Telegram?.WebApp?.close(); } catch {}
 }
 
+// ─── Ссылки приглашения ──────────────────────────────────────────────
+
+/**
+ * Строим ссылку для вступления в команду.
+ * Формат: https://t.me/aiplannerrubot?start=join_INVITECODE
+ * Пользователь нажимает → бот открывает приложение.
+ * Параметр start_param читается в parseStartParam().
+ */
 export function buildInviteLink(inviteCode: string): string {
-  return `https://t.me/${BOT_USERNAME}/${APP_NAME}?startapp=join_${inviteCode}`;
+  return `https://t.me/${BOT_USERNAME}?start=join_${inviteCode}`;
+}
+
+/** Ссылка для прямого открытия мини-апп через /start параметр */
+export function buildDirectLink(inviteCode: string): string {
+  // Если WEBAPP_URL задан — используем прямую ссылку
+  const webAppUrl = (window as any).__WEBAPP_URL__ || "";
+  if (webAppUrl) {
+    return `${webAppUrl}?join=${inviteCode}`;
+  }
+  return buildInviteLink(inviteCode);
 }
 
 export function shareInviteToTelegram(
@@ -158,36 +116,83 @@ export function shareInviteToTelegram(
   wsName: string,
   ru: boolean
 ): void {
-  const link = buildInviteLink(inviteCode);
-  const text = ru
-    ? `🚀 Присоединяйся к команде «${wsName}» в CortexAI!\n\nКод: ${inviteCode}`
-    : `🚀 Join team "${wsName}" in CortexAI!\n\nCode: ${inviteCode}`;
-
-  const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
-
   try {
-    const tg = (window as any).Telegram?.WebApp;
+    const tg   = (window as any).Telegram?.WebApp;
+    const link = buildInviteLink(inviteCode);
+    const text = ru
+      ? `🚀 Присоединяйся к команде «${wsName}» в CortexAI!\n\nНажми ссылку ниже или введи код вручную: ${inviteCode}\n\n${link}`
+      : `🚀 Join team "${wsName}" in CortexAI!\n\nClick the link or enter code: ${inviteCode}\n\n${link}`;
+
     if (tg?.openTelegramLink) {
+      // Делимся через Telegram share sheet
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
       tg.openTelegramLink(shareUrl);
-    } else if (navigator.share) {
-      navigator.share({ title: wsName, text, url: link }).catch(() => {});
     } else {
-      navigator.clipboard.writeText(`${text}\n\n${link}`).catch(() => {});
+      // Fallback: copy to clipboard
+      navigator.clipboard?.writeText(text).catch(() => {});
+      alert(ru ? "Ссылка скопирована!" : "Link copied!");
     }
-  } catch {}
+  } catch (e: any) {
+    console.warn("shareInviteToTelegram:", e.message);
+  }
 }
 
 export async function copyInviteLink(inviteCode: string): Promise<void> {
   const link = buildInviteLink(inviteCode);
   try {
     await navigator.clipboard.writeText(link);
-    triggerHaptic("success");
-  } catch {}
+  } catch {
+    const el = document.createElement("textarea");
+    el.value = link;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand("copy");
+    document.body.removeChild(el);
+  }
 }
 
 export async function copyInviteCode(code: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(code);
-    triggerHaptic("success");
+  } catch {
+    const el = document.createElement("textarea");
+    el.value = code;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand("copy");
+    document.body.removeChild(el);
+  }
+}
+
+// ─── Парсинг параметров запуска ──────────────────────────────────────
+
+/**
+ * Парсим start_param из Telegram WebApp.
+ * Поддерживаем форматы:
+ *   join_INVITECODE  → { type: "join", code: "INVITECODE" }
+ *   w=WORKSPACE_ID   → { type: "workspace", id: "..." }
+ */
+export function parseStartParam(): { type: "join"; code: string } | { type: "workspace"; id: string } | null {
+  try {
+    const tg = (window as any).Telegram?.WebApp;
+    const startParam = tg?.initDataUnsafe?.start_param || "";
+
+    if (startParam.startsWith("join_")) {
+      const code = startParam.replace("join_", "").toUpperCase();
+      if (code.length >= 6) return { type: "join", code };
+    }
+
+    if (startParam.startsWith("w=")) {
+      return { type: "workspace", id: startParam.replace("w=", "") };
+    }
+
+    // Также проверяем URL параметры (для веб-версии)
+    const urlParams = new URLSearchParams(window.location.search);
+    const joinCode  = urlParams.get("join");
+    if (joinCode) return { type: "join", code: joinCode.toUpperCase() };
+
+    const wsId = urlParams.get("w");
+    if (wsId) return { type: "workspace", id: wsId };
   } catch {}
+  return null;
 }
